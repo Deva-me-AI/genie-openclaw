@@ -137,7 +137,7 @@
 - Pi sessions live under `~/.openclaw/sessions/` by default; the base directory is not configurable.
 - Environment variables: see `~/.profile`.
 - Never commit or publish real phone numbers, videos, or live configuration values. Use obviously fake placeholders in docs, tests, and examples.
-- Release flow: always read `docs/reference/RELEASING.md` and `docs/platforms/mac/release.md` before any release work; do not ask routine questions once those docs answer them.
+- Release flow: always read `docs/reference/RELEASING.md` and `docs/platforms/mac/release.md` before any release work; do not ask routine questions once those docs answer them. For fork-specific release steps (Docker images to ghcr.io, three GitHub workflows, upgrading genie servers via `genie-upgrade.sh`), also read `docs/releasing.md`.
 
 ## GHSA (Repo Advisory) Patch/Publish
 

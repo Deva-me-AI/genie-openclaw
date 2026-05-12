@@ -75,6 +75,13 @@ Welcome to the lobster tank! 🦞
 - Keep PRs focused (one thing per PR; do not mix unrelated concerns)
 - Describe what & why
 
+## Releasing
+
+| Doc                                                        | What it covers                                                                                                         |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [docs/reference/RELEASING.md](docs/reference/RELEASING.md) | Step-by-step release checklist: version bump, build, changelog, npm publish, macOS app                                 |
+| [docs/releasing.md](docs/releasing.md)                     | Fork-specific release: Docker images (ghcr.io), three GitHub workflows, upgrading genie servers via `genie-upgrade.sh` |
+
 ## Control UI Decorators
 
 The Control UI uses Lit with **legacy** decorators (current Rollup parsing does not support
