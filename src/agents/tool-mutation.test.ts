@@ -37,6 +37,33 @@ describe("tool mutation helpers", () => {
     expect(readFingerprint).toBeUndefined();
   });
 
+  it("canonicalizes file-path arg aliases so retries on the same target dedup", () => {
+    // Claude-Code-convention `file_path`, pi-coding-agent `path`, and the
+    // camelCase / lowercase variants must all produce the same fingerprint —
+    // otherwise a retry would not clear a stale failure on the same file.
+    const fromSnake = buildToolActionFingerprint(
+      "edit",
+      { file_path: "/tmp/a.md", new_string: "x" },
+      "in /tmp/a.md (1 chars)",
+    );
+    const fromCanonical = buildToolActionFingerprint(
+      "edit",
+      { path: "/tmp/a.md", newText: "x" },
+      "in /tmp/a.md (1 chars)",
+    );
+    const fromCamel = buildToolActionFingerprint(
+      "edit",
+      { filePath: "/tmp/a.md", newText: "x" },
+      "in /tmp/a.md (1 chars)",
+    );
+    expect(fromSnake).toBe(fromCanonical);
+    expect(fromCamel).toBe(fromCanonical);
+    expect(fromCanonical).toContain("path=/tmp/a.md");
+    // Volatile `(N chars)` meta must not leak into the fingerprint when a
+    // stable path arg is available.
+    expect(fromCanonical).not.toContain("meta=");
+  });
+
   it("exposes mutation state for downstream payload rendering", () => {
     expect(
       buildToolMutationState("message", { action: "send", to: "telegram:1" }).mutatingAction,

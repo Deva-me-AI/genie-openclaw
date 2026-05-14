@@ -334,6 +334,29 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads[1]?.text).not.toContain("missing");
   });
 
+  it("suppresses mutating tool warnings when assistant acknowledges the failed action", () => {
+    const text = "I couldn't update the file, so no changes were applied.";
+    const payloads = buildPayloads({
+      assistantTexts: [text],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: { toolName: "edit", error: "file missing" },
+    });
+
+    expectSinglePayloadText(payloads, text);
+  });
+
+  it("keeps mutating tool warnings when assistant text only claims overall success", () => {
+    const payloads = buildPayloads({
+      assistantTexts: ["No issues found. The update is complete."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: { toolName: "edit", error: "file missing" },
+    });
+
+    expect(payloads).toHaveLength(2);
+    expect(payloads[1]?.isError).toBe(true);
+    expect(payloads[1]?.text).toContain("Edit");
+  });
+
   it("does not treat session_status read failures as mutating when explicitly flagged", () => {
     const payloads = buildPayloads({
       assistantTexts: ["Status loaded."],

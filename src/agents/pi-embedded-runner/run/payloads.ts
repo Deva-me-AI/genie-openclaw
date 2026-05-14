@@ -43,9 +43,56 @@ const RECOVERABLE_TOOL_ERROR_KEYWORDS = [
   "requires",
 ] as const;
 
+// Phrases the assistant uses to acknowledge a mutating tool failure in its
+// own reply. When the assistant already told the user "I couldn't update the
+// file" (or similar), a follow-up ⚠️ warning would be a duplicate and
+// confuse the reader, so it is suppressed.
+const MUTATING_FAILURE_ACTION_PATTERN =
+  "(?:write|edit|update|save|create|delete|remove|modify|change|apply|patch|move|rename|send|reply|message|run|execute|execution|command|script|shell|bash|exec|tool|action|operation)";
+
+const MUTATING_FAILURE_INABILITY_PATTERN = new RegExp(
+  `\\b(?:couldn't|could not|can't|cannot|unable to|am unable to|wasn't able to|was not able to|were unable to)\\b.{0,100}\\b${MUTATING_FAILURE_ACTION_PATTERN}\\b`,
+  "u",
+);
+const MUTATING_FAILURE_ACTION_THEN_FAILURE_PATTERN = new RegExp(
+  `\\b${MUTATING_FAILURE_ACTION_PATTERN}\\b.{0,100}\\b(?:failed|failure|errored)\\b`,
+  "u",
+);
+const MUTATING_FAILURE_FAILURE_THEN_ACTION_PATTERN = new RegExp(
+  `\\b(?:failed|failure)\\b.{0,100}\\b${MUTATING_FAILURE_ACTION_PATTERN}\\b`,
+  "u",
+);
+const MUTATING_FAILURE_ERROR_WHILE_ACTION_PATTERN = new RegExp(
+  `\\b(?:hit|encountered|ran into)\\b.{0,60}\\berror\\b.{0,100}\\b(?:while|trying to|when)\\b.{0,100}\\b${MUTATING_FAILURE_ACTION_PATTERN}\\b`,
+  "u",
+);
+const DID_NOT_FAIL_PATTERN = /\b(?:did not|didn't)\s+fail\b/u;
+const NEGATED_FAILURE_PATTERN = /\b(?:no|not|without)\s+(?:failures?|errors?)\b/u;
+
 function isRecoverableToolError(error: string | undefined): boolean {
   const errorLower = (error ?? "").toLowerCase();
   return RECOVERABLE_TOOL_ERROR_KEYWORDS.some((keyword) => errorLower.includes(keyword));
+}
+
+function hasExplicitMutatingToolFailureAcknowledgement(text: string): boolean {
+  const normalizedText = normalizeTextForComparison(text);
+  if (!normalizedText) {
+    return false;
+  }
+  if (DID_NOT_FAIL_PATTERN.test(normalizedText)) {
+    return false;
+  }
+  if (MUTATING_FAILURE_INABILITY_PATTERN.test(normalizedText)) {
+    return true;
+  }
+  if (NEGATED_FAILURE_PATTERN.test(normalizedText)) {
+    return false;
+  }
+  return (
+    MUTATING_FAILURE_ACTION_THEN_FAILURE_PATTERN.test(normalizedText) ||
+    MUTATING_FAILURE_FAILURE_THEN_ACTION_PATTERN.test(normalizedText) ||
+    MUTATING_FAILURE_ERROR_WHILE_ACTION_PATTERN.test(normalizedText)
+  );
 }
 
 function isVerboseToolDetailEnabled(level?: VerboseLevel): boolean {
@@ -55,6 +102,8 @@ function isVerboseToolDetailEnabled(level?: VerboseLevel): boolean {
 function resolveToolErrorWarningPolicy(params: {
   lastToolError: LastToolError;
   hasUserFacingReply: boolean;
+  hasUserFacingErrorReply: boolean;
+  hasUserFacingFailureAcknowledgement: boolean;
   suppressToolErrors: boolean;
   suppressToolErrorWarnings?: boolean;
   verboseLevel?: VerboseLevel;
@@ -76,7 +125,14 @@ function resolveToolErrorWarningPolicy(params: {
   const isMutatingToolError =
     params.lastToolError.mutatingAction ?? isLikelyMutatingToolName(params.lastToolError.toolName);
   if (isMutatingToolError) {
-    return { showWarning: true, includeDetails };
+    // Surface mutating failures unless the assistant has already covered them
+    // in its own reply — either via an error-flagged reply for this turn, or
+    // by explicitly acknowledging the failed action in plain text. A
+    // duplicate ⚠️ in that case is just noise.
+    return {
+      showWarning: !params.hasUserFacingErrorReply && !params.hasUserFacingFailureAcknowledgement,
+      includeDetails,
+    };
   }
   if (params.suppressToolErrors) {
     return { showWarning: false, includeDetails };
@@ -252,6 +308,7 @@ export function buildEmbeddedRunPayloads(params: {
   ).filter((text) => !shouldSuppressRawErrorText(text));
 
   let hasUserFacingAssistantReply = false;
+  let hasUserFacingFailureAcknowledgement = false;
   for (const text of answerTexts) {
     const {
       text: cleanedText,
@@ -273,19 +330,26 @@ export function buildEmbeddedRunPayloads(params: {
       replyToCurrent,
     });
     hasUserFacingAssistantReply = true;
+    if (cleanedText && hasExplicitMutatingToolFailureAcknowledgement(cleanedText)) {
+      hasUserFacingFailureAcknowledgement = true;
+    }
   }
 
   if (params.lastToolError) {
+    const hasUserFacingErrorReply = replyItems.some((item) => item.isError === true);
     const warningPolicy = resolveToolErrorWarningPolicy({
       lastToolError: params.lastToolError,
       hasUserFacingReply: hasUserFacingAssistantReply,
+      hasUserFacingErrorReply,
+      hasUserFacingFailureAcknowledgement,
       suppressToolErrors: Boolean(params.config?.messages?.suppressToolErrors),
       suppressToolErrorWarnings: params.suppressToolErrorWarnings,
       verboseLevel: params.verboseLevel,
     });
 
-    // Always surface mutating tool failures so we do not silently confirm actions that did not happen.
-    // Otherwise, keep the previous behavior and only surface non-recoverable failures when no reply exists.
+    // Surface mutating failures unless the assistant already acknowledged the
+    // failed action in its reply. For non-mutating tools, keep the previous
+    // behavior of only surfacing non-recoverable failures when no reply exists.
     if (warningPolicy.showWarning) {
       const toolSummary = formatToolAggregate(
         params.lastToolError.toolName,

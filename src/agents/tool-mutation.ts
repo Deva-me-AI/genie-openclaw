@@ -31,6 +31,26 @@ const READ_ONLY_ACTIONS = new Set([
   "probe",
 ]);
 
+// Fingerprint argument aliases. Each group maps multiple arg-key spellings
+// (camelCase / snake_case / lowercase) emitted by different model conventions
+// onto a single canonical segment in the fingerprint string. This keeps
+// retry-dedup stable when a model alternates spellings (e.g. Claude Code
+// emits `file_path`, pi-coding-agent emits `path`).
+const FINGERPRINT_ARG_ALIAS_GROUPS: ReadonlyArray<{
+  canonical: string;
+  aliases: readonly string[];
+}> = [
+  { canonical: "path", aliases: ["path", "file_path", "filePath", "filepath", "file"] },
+  { canonical: "oldpath", aliases: ["oldPath", "old_path"] },
+  { canonical: "newpath", aliases: ["newPath", "new_path"] },
+  { canonical: "to", aliases: ["to", "target"] },
+  { canonical: "messageid", aliases: ["messageId", "message_id"] },
+  { canonical: "sessionkey", aliases: ["sessionKey", "session_key"] },
+  { canonical: "jobid", aliases: ["jobId", "job_id"] },
+  { canonical: "id", aliases: ["id"] },
+  { canonical: "model", aliases: ["model"] },
+];
+
 const PROCESS_MUTATING_ACTIONS = new Set(["write", "send_keys", "submit", "paste", "kill"]);
 
 const MESSAGE_MUTATING_ACTIONS = new Set([
@@ -151,24 +171,19 @@ export function buildToolActionFingerprint(
   if (action) {
     parts.push(`action=${action}`);
   }
+  // Aliases (camelCase + snake_case + lowercase) collapse onto one canonical
+  // segment so Claude-Code-convention args (`file_path`, `old_string`, …) and
+  // pi-coding-agent args (`path`, `oldText`, …) produce the same fingerprint
+  // for the same call, and dedup of retries on the same target is stable.
   let hasStableTarget = false;
-  for (const key of [
-    "path",
-    "filePath",
-    "oldPath",
-    "newPath",
-    "to",
-    "target",
-    "messageId",
-    "sessionKey",
-    "jobId",
-    "id",
-    "model",
-  ]) {
-    const value = normalizeFingerprintValue(record?.[key]);
-    if (value) {
-      parts.push(`${key.toLowerCase()}=${value}`);
-      hasStableTarget = true;
+  for (const { canonical, aliases } of FINGERPRINT_ARG_ALIAS_GROUPS) {
+    for (const alias of aliases) {
+      const value = normalizeFingerprintValue(record?.[alias]);
+      if (value) {
+        parts.push(`${canonical}=${value}`);
+        hasStableTarget = true;
+        break;
+      }
     }
   }
   const normalizedMeta = meta?.trim().replace(/\s+/g, " ").toLowerCase();
