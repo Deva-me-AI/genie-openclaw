@@ -10,6 +10,7 @@ import { handleApproveCommand } from "./commands-approve.js";
 import { handleBashCommand } from "./commands-bash.js";
 import { handleCompactCommand } from "./commands-compact.js";
 import { handleConfigCommand, handleDebugCommand } from "./commands-config.js";
+import { handleConnectAiSubscriptionCommand } from "./commands-connect-ai.js";
 import {
   handleCommandsListCommand,
   handleContextCommand,
@@ -157,6 +158,7 @@ export async function handleCommands(params: HandleCommandsParams): Promise<Comm
       handleModelsCommand,
       handleStopCommand,
       handleCompactCommand,
+      handleConnectAiSubscriptionCommand,
       handleAbortTrigger,
     ];
   }

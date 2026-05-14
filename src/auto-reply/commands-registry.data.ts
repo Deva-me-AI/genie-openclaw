@@ -732,6 +732,29 @@ function buildChatCommands(): ChatCommandDefinition[] {
         },
       ],
     }),
+    defineChatCommand({
+      key: "connect_ai_subscription",
+      nativeName: "connect_ai_subscription",
+      description: "Connect an AI subscription (Gemini, Codex, or Claude).",
+      textAlias: "/connect_ai_subscription",
+      category: "management",
+      args: [
+        {
+          name: "provider",
+          description: "AI provider to connect",
+          type: "string",
+          choices: [
+            { value: "gemini", label: "Gemini (Google)" },
+            { value: "codex", label: "OpenAI (Codex)" },
+            { value: "anthropic", label: "Anthropic (Claude)" },
+          ],
+        },
+      ],
+      argsMenu: {
+        arg: "provider",
+        title: "Connect an AI subscription.\nChoose a provider to get started:",
+      },
+    }),
     ...listChannelDocks()
       .filter((dock) => dock.capabilities.nativeCommands)
       .map((dock) => defineDockCommand(dock)),
