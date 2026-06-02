@@ -3,15 +3,15 @@
   "version": "2026.4.17",
   "description": "Multi-channel AI gateway with extensible messaging integrations",
   "keywords": [],
-  "homepage": "https://github.com/Bitplanet-L1/genie-openclaw#readme",
+  "homepage": "https://github.com/Deva-me-AI/genie-openclaw#readme",
   "bugs": {
-    "url": "https://github.com/Bitplanet-L1/genie-openclaw/issues"
+    "url": "https://github.com/Deva-me-AI/genie-openclaw/issues"
   },
   "license": "MIT",
   "author": "",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Bitplanet-L1/genie-openclaw.git"
+    "url": "git+https://github.com/Deva-me-AI/genie-openclaw.git"
   },
   "bin": {
     "openclaw": "openclaw.mjs"

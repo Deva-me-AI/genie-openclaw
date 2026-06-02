@@ -130,7 +130,7 @@ Image tags:
 npm info @bitplanet/genie-openclaw version
 
 # GitHub Release
-gh release view v2026.5.12 --repo Bitplanet-L1/genie-openclaw
+gh release view v2026.5.12 --repo Deva-me-AI/genie-openclaw
 
 # Docker
 docker pull ghcr.io/bitplanet-l1/genie-openclaw:2026.5.12
