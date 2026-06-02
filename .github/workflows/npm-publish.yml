@@ -28,4 +28,12 @@ jobs:
 
       - run: pnpm build
 
-      - run: npm publish --provenance --access public
+      - name: Publish to npm
+        run: |
+          # Prerelease tags (e.g. v2026.5.14-beta.1) must NOT land on the
+          # "latest" dist-tag; route them to "beta". Stable tags -> latest.
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            npm publish --provenance --access public --tag beta
+          else
+            npm publish --provenance --access public
+          fi
