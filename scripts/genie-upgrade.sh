@@ -15,7 +15,7 @@
 #
 set -euo pipefail
 
-REPO="Bitplanet-L1/genie-openclaw"
+REPO="Deva-me-AI/genie-openclaw"
 TAG="${1:-}"
 
 echo "=== Genie Upgrade ==="
