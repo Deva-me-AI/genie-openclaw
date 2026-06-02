@@ -2131,6 +2131,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ ! -f scripts/ci-run-timings.mjs ]; then
+            echo "CI timing summary helper is unavailable on the trusted checkout; skipping." > ci-timings-summary.txt
+            cat ci-timings-summary.txt >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           node scripts/ci-run-timings.mjs "$GITHUB_RUN_ID" --limit 25 > ci-timings-summary.txt
           cat ci-timings-summary.txt >> "$GITHUB_STEP_SUMMARY"
 

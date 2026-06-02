@@ -96,7 +96,7 @@ describe("ci workflow guards", () => {
     expect(workflow).not.toContain("$fetchInfo.RedirectStandardOutput = $true");
     expect(workflow).not.toContain("$fetchInfo.RedirectStandardError = $true");
     expect(workflow).toContain(
-      '--no-tags --no-progress --prune --no-recurse-submodules --depth=50',
+      "--no-tags --no-progress --prune --no-recurse-submodules --depth=50",
     );
     expect(workflow).toContain("$fetch = New-Object System.Diagnostics.Process");
     expect(workflow).toContain("$fetch.StartInfo = $fetchInfo");
@@ -171,6 +171,7 @@ describe("ci workflow guards", () => {
 
     const writeStep = timingJob.steps.find((step) => step.name === "Write CI timing summary");
     expect(writeStep.env).toMatchObject({ GH_TOKEN: "${{ github.token }}" });
+    expect(writeStep.run).toContain("CI timing summary helper is unavailable");
     expect(writeStep.run).toContain(
       'node scripts/ci-run-timings.mjs "$GITHUB_RUN_ID" --limit 25 > ci-timings-summary.txt',
     );
