@@ -67,6 +67,18 @@ describe("version resolution", () => {
     });
   });
 
+  it("resolves package version from Genie fork package metadata", async () => {
+    await withVersionFixtureDir(async (root) => {
+      await writeJsonFixture(root, "package.json", {
+        name: "@bitplanet/genie-openclaw",
+        version: "5.6.7",
+      });
+      const moduleUrl = await ensureModuleFixture(root);
+      expect(readVersionFromPackageJsonForModuleUrl(moduleUrl)).toBe("5.6.7");
+      expect(resolveVersionFromModuleUrl(moduleUrl)).toBe("5.6.7");
+    });
+  });
+
   it("ignores unrelated nearby package.json files", async () => {
     await withVersionFixtureDir(async (root) => {
       await writeJsonFixture(root, "package.json", { name: "openclaw", version: "2.3.4" });
