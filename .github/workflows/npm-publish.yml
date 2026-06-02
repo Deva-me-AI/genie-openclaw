@@ -1,0 +1,39 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24 ships npm 11.x, which supports OIDC trusted publishing.
+      # Node 22 default (npm 10.x) signs provenance but can't complete the
+      # registry handshake with a trusted publisher and falls back to
+      # anonymous PUT (404).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+
+      - run: pnpm install
+
+      - run: pnpm build
+
+      - name: Publish to npm
+        run: |
+          # Prerelease tags (e.g. v2026.5.14-beta.1) must NOT land on the
+          # "latest" dist-tag; route them to "beta". Stable tags -> latest.
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            npm publish --provenance --access public --tag beta
+          else
+            npm publish --provenance --access public
+          fi
