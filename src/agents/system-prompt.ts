@@ -671,6 +671,8 @@ export function buildAgentSystemPrompt(params: {
   sourcePath?: string;
   workspaceNotes?: string[];
   ttsHint?: string;
+  /** User-defined custom instructions from the web UI. */
+  customInstructions?: string;
   /** Controls which hardcoded sections to include. Defaults to "full". */
   promptMode?: PromptMode;
   /** Controls the generic silent-reply section. Channel-aware prompts can set "none". */
@@ -1257,6 +1259,10 @@ export function buildAgentSystemPrompt(params: {
     const contextHeader =
       promptMode === "minimal" ? "## Subagent Context" : "## Group Chat Context";
     lines.push(contextHeader, extraSystemPrompt, "");
+  }
+  const customInstructions = params.customInstructions?.trim();
+  if (customInstructions) {
+    lines.push("## User Rules", "", "<user-rules>", customInstructions, "</user-rules>", "");
   }
   if (params.reactionGuidance) {
     const { level, channel } = params.reactionGuidance;

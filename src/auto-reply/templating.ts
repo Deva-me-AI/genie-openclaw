@@ -227,6 +227,8 @@ export type MsgContext = {
   UntrustedStructuredContext?: UntrustedStructuredContextEntry[];
   /** System-attached provenance for the current inbound message. */
   InputProvenance?: InputProvenance;
+  /** User-defined custom instructions from the web UI. */
+  CustomInstructions?: string;
   /** Explicit owner allowlist overrides (trusted, configuration-derived). */
   OwnerAllowFrom?: Array<string | number>;
   SenderName?: string;

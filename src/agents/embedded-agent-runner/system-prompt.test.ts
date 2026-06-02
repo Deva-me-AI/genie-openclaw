@@ -24,6 +24,28 @@ describe("buildEmbeddedSystemPrompt", () => {
     clearMemoryPluginState();
   });
 
+  it("forwards custom instructions into user rules", () => {
+    const prompt = buildEmbeddedSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      reasoningTagHint: false,
+      runtimeInfo: {
+        host: "local",
+        os: "darwin",
+        arch: "arm64",
+        node: process.version,
+        model: "gpt-5.4",
+        provider: "openai",
+      },
+      tools: [],
+      modelAliasLines: [],
+      userTimezone: "UTC",
+      customInstructions: "Keep replies concise.",
+    });
+
+    expect(prompt).toContain("## User Rules");
+    expect(prompt).toContain("<user-rules>\nKeep replies concise.\n</user-rules>");
+  });
+
   it("forwards provider prompt contributions into the embedded prompt", () => {
     const prompt = buildEmbeddedSystemPrompt({
       workspaceDir: "/tmp/openclaw",

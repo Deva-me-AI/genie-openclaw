@@ -13,6 +13,16 @@ import {
 } from "./system-prompt.js";
 
 describe("buildAgentSystemPrompt", () => {
+  it("injects custom instructions as user rules", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      customInstructions: "Prefer terse operational answers.",
+    });
+
+    expect(prompt).toContain("## User Rules");
+    expect(prompt).toContain("<user-rules>\nPrefer terse operational answers.\n</user-rules>");
+  });
+
   it("resolves helper session keys to scoped prompt surfaces", () => {
     expect(resolveAgentPromptSurfaceForSessionKey("agent:main:subagent:child")).toBe("subagent");
     expect(resolveAgentPromptSurfaceForSessionKey("agent:codex:acp:child")).toBe("acp_backend");

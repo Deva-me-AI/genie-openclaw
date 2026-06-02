@@ -129,7 +129,6 @@ import {
   ensureGitCheckout,
   normalizeTag,
   parseTimeoutMsOrExit,
-  readPackageName,
   readPackageVersion,
   resolveGitInstallDir,
   resolveGlobalManager,
@@ -1012,13 +1011,13 @@ async function resolvePackageRuntimePreflightError(params: {
     ? `Node ${runtime.version ?? "unknown"} at ${runtime.nodeRunner}`
     : `Node ${runtime.version ?? "unknown"}`;
   return [
-    `${runtimeLabel} is too old for openclaw@${targetLabel}.`,
+    `${runtimeLabel} is too old for ${DEFAULT_PACKAGE_NAME}@${targetLabel}.`,
     `The requested package requires ${status.nodeEngine}.`,
     runtime.nodeRunner
       ? "Upgrade the Node runtime that owns the managed Gateway service, then rerun `openclaw update`."
       : "Upgrade Node to 22.19+ or Node 24, then rerun `openclaw update`.",
-    "Bare `npm i -g openclaw` can silently install an older compatible release.",
-    "After upgrading Node, use `npm i -g openclaw@latest`.",
+    `Bare \`npm i -g ${DEFAULT_PACKAGE_NAME}\` can silently install an older compatible release.`,
+    `After upgrading Node, use \`npm i -g ${DEFAULT_PACKAGE_NAME}@latest\`.`,
   ].join("\n");
 }
 
@@ -1425,9 +1424,7 @@ async function runPackageInstallUpdate(params: {
     honorPackageRoot: params.honorPackageRoot === true,
   });
   const pkgRoot = installTarget.packageRoot;
-  const packageName =
-    (pkgRoot ? await readPackageName(pkgRoot) : await readPackageName(params.root)) ??
-    DEFAULT_PACKAGE_NAME;
+  const packageName = DEFAULT_PACKAGE_NAME;
   const installSpec = resolveGlobalInstallSpec({
     packageName,
     tag: params.tag,
@@ -3429,7 +3426,7 @@ async function updateCommandInternal(opts: UpdateCommandOptions): Promise<void> 
       );
       defaultRuntime.log(
         theme.muted(
-          `Examples: \`${replaceCliName("npm i -g openclaw@latest", CLI_NAME)}\` or \`${replaceCliName("pnpm add -g openclaw@latest", CLI_NAME)}\``,
+          `Examples: \`${replaceCliName(`npm i -g ${DEFAULT_PACKAGE_NAME}@latest`, CLI_NAME)}\` or \`${replaceCliName(`pnpm add -g ${DEFAULT_PACKAGE_NAME}@latest`, CLI_NAME)}\``,
         ),
       );
     }

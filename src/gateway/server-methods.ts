@@ -267,7 +267,14 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
     loadHandlers: loadHealthHandlers,
   }),
   ...createLazyCoreHandlers({
-    methods: ["channels.status", "channels.start", "channels.stop", "channels.logout"],
+    methods: [
+      "channels.status",
+      "channels.start",
+      "channels.stop",
+      "channels.logout",
+      "channels.pairing.list",
+      "channels.pairing.approve",
+    ],
     loadHandlers: loadChannelsHandlers,
   }),
   ...createLazyCoreHandlers({

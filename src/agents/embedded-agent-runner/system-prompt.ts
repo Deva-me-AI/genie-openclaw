@@ -31,6 +31,8 @@ export function buildEmbeddedSystemPrompt(params: {
   docsPath?: string;
   sourcePath?: string;
   ttsHint?: string;
+  /** User-defined custom instructions from the web UI. */
+  customInstructions?: string;
   reactionGuidance?: {
     level: "minimal" | "extensive";
     channel: string;
@@ -95,6 +97,7 @@ export function buildEmbeddedSystemPrompt(params: {
     docsPath: params.docsPath,
     sourcePath: params.sourcePath,
     ttsHint: params.ttsHint,
+    customInstructions: params.customInstructions,
     workspaceNotes: params.workspaceNotes,
     reactionGuidance: params.reactionGuidance,
     promptMode: params.promptMode,

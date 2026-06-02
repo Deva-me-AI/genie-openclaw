@@ -197,6 +197,14 @@ describe("resolveOpenClawPackageRoot", () => {
       },
     },
     {
+      name: "resolves the Genie fork package root",
+      setup: () => {
+        const pkgRoot = fx("genie-package");
+        setPackageRoot(pkgRoot, "@bitplanet/genie-openclaw");
+        return { opts: { cwd: pkgRoot }, expected: pkgRoot };
+      },
+    },
+    {
       name: "returns null for non-openclaw package roots",
       setup: () => {
         const pkgRoot = fx("not-openclaw");

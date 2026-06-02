@@ -1,0 +1,53 @@
+# GitHub
+.github/
+
+# Source files (dist is included)
+src/
+
+# Test files
+*.test.ts
+
+# Environment files
+.env*
+
+# TypeScript configs
+tsconfig*.json
+
+# Package manager
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
+# Git
+.git*
+
+# Patches
+patches/
+
+# Docker
+Dockerfile*
+docker-*
+
+# Deployment configs
+fly*.toml
+render.yaml
+
+# Python
+pyproject.toml
+
+# Pi agent
+.pi/
+
+# Git hooks
+git-hooks/
+
+# Native apps
+apps/
+
+# Vendor
+vendor/
+
+# Security scanning
+zizmor.yml
+
+# Web UI source
+ui/

@@ -125,7 +125,11 @@ describe("agent-runner-utils", () => {
   });
 
   it("builds embedded run base params with auth profile and run metadata", () => {
-    const run = makeRun({ enforceFinalTag: true, cwd: "/tmp/task-repo" });
+    const run = makeRun({
+      enforceFinalTag: true,
+      cwd: "/tmp/task-repo",
+      customInstructions: "Prefer concise replies.",
+    });
     const authProfile = resolveProviderScopedAuthProfile({
       provider: "openai",
       primaryProvider: "openai",
@@ -148,6 +152,7 @@ describe("agent-runner-utils", () => {
     expect(resolved.config).toBe(run.config);
     expect(resolved.skillsSnapshot).toBe(run.skillsSnapshot);
     expect(resolved.ownerNumbers).toBe(run.ownerNumbers);
+    expect(resolved.customInstructions).toBe("Prefer concise replies.");
     expect(resolved.enforceFinalTag).toBe(true);
     expect(resolved.provider).toBe("openai");
     expect(resolved.model).toBe("gpt-4.1-mini");

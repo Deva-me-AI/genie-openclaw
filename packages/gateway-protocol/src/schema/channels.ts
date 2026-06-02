@@ -738,6 +738,22 @@ export const ChannelsLogoutParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const ChannelsPairingListParamsSchema = Type.Object(
+  {
+    channel: Type.Optional(NonEmptyString),
+  },
+  { additionalProperties: false },
+);
+
+export const ChannelsPairingApproveParamsSchema = Type.Object(
+  {
+    channel: NonEmptyString,
+    code: NonEmptyString,
+    notify: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+
 export const ChannelsStopParamsSchema = Type.Object(
   {
     channel: NonEmptyString,
