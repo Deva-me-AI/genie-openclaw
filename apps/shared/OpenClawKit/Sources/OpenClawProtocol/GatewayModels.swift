@@ -3998,6 +3998,42 @@ public struct ChannelsLogoutParams: Codable, Sendable {
     }
 }
 
+public struct ChannelsPairingListParams: Codable, Sendable {
+    public let channel: String?
+
+    public init(
+        channel: String?)
+    {
+        self.channel = channel
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case channel
+    }
+}
+
+public struct ChannelsPairingApproveParams: Codable, Sendable {
+    public let channel: String
+    public let code: String
+    public let notify: Bool?
+
+    public init(
+        channel: String,
+        code: String,
+        notify: Bool?)
+    {
+        self.channel = channel
+        self.code = code
+        self.notify = notify
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case channel
+        case code
+        case notify
+    }
+}
+
 public struct WebLoginStartParams: Codable, Sendable {
     public let force: Bool?
     public let timeoutms: Int?
@@ -6515,6 +6551,7 @@ public struct ChatSendParams: Codable, Sendable {
     public let timeoutms: Int?
     public let systeminputprovenance: [String: AnyCodable]?
     public let systemprovenancereceipt: String?
+    public let custominstructions: String?
     public let idempotencykey: String
 
     public init(
@@ -6532,6 +6569,7 @@ public struct ChatSendParams: Codable, Sendable {
         timeoutms: Int?,
         systeminputprovenance: [String: AnyCodable]?,
         systemprovenancereceipt: String?,
+        custominstructions: String? = nil,
         idempotencykey: String)
     {
         self.sessionkey = sessionkey
@@ -6548,6 +6586,7 @@ public struct ChatSendParams: Codable, Sendable {
         self.timeoutms = timeoutms
         self.systeminputprovenance = systeminputprovenance
         self.systemprovenancereceipt = systemprovenancereceipt
+        self.custominstructions = custominstructions
         self.idempotencykey = idempotencykey
     }
 
@@ -6566,6 +6605,7 @@ public struct ChatSendParams: Codable, Sendable {
         case timeoutms = "timeoutMs"
         case systeminputprovenance = "systemInputProvenance"
         case systemprovenancereceipt = "systemProvenanceReceipt"
+        case custominstructions = "customInstructions"
         case idempotencykey = "idempotencyKey"
     }
 }

@@ -2359,6 +2359,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       timeoutMs?: number;
       systemInputProvenance?: InputProvenance;
       systemProvenanceReceipt?: string;
+      customInstructions?: string;
       idempotencyKey: string;
     };
     const explicitOriginResult = normalizeExplicitChatSendOrigin({
@@ -2762,6 +2763,7 @@ export const chatHandlers: GatewayRequestHandlers = {
             }
           : {}),
         GatewayClientScopes: client?.connect?.scopes ?? [],
+        CustomInstructions: p.customInstructions?.trim() || undefined,
       };
       if (mediaPathOffloadPaths.length > 0) {
         // Inject offloads via the same MsgContext fields the channel

@@ -1,6 +1,11 @@
 import { Compile } from "typebox/compile";
 import { describe, expect, it } from "vitest";
-import { ChannelsStatusResultSchema, WebLoginWaitParamsSchema } from "./schema/channels.js";
+import {
+  ChannelsPairingApproveParamsSchema,
+  ChannelsPairingListParamsSchema,
+  ChannelsStatusResultSchema,
+  WebLoginWaitParamsSchema,
+} from "./schema/channels.js";
 
 describe("WebLoginWaitParamsSchema", () => {
   const validate = Compile(WebLoginWaitParamsSchema);
@@ -61,5 +66,22 @@ describe("ChannelsStatusResultSchema", () => {
         },
       }),
     ).toBe(true);
+  });
+});
+
+describe("channel pairing schemas", () => {
+  it("accepts list and approve params for web channel pairing", () => {
+    const validateList = Compile(ChannelsPairingListParamsSchema);
+    const validateApprove = Compile(ChannelsPairingApproveParamsSchema);
+
+    expect(validateList.Check({})).toBe(true);
+    expect(validateList.Check({ channel: "telegram" })).toBe(true);
+    expect(validateList.Check({ channel: "" })).toBe(false);
+
+    expect(validateApprove.Check({ channel: "telegram", code: "ABCD2345" })).toBe(true);
+    expect(validateApprove.Check({ channel: "telegram", code: "ABCD2345", notify: false })).toBe(
+      true,
+    );
+    expect(validateApprove.Check({ channel: "telegram" })).toBe(false);
   });
 });

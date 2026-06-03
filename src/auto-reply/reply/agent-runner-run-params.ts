@@ -76,6 +76,7 @@ export function buildEmbeddedRunBaseParams(params: {
     config,
     skillsSnapshot: params.run.skillsSnapshot,
     ownerNumbers: params.run.ownerNumbers,
+    customInstructions: params.run.customInstructions,
     inputProvenance: params.run.inputProvenance,
     senderIsOwner: params.run.senderIsOwner,
     enforceFinalTag: resolveEnforceFinalTagWithResolver(

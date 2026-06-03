@@ -3,7 +3,10 @@ import { TALK_TEST_PROVIDER_ID } from "../../../src/test-utils/talk-test-provide
 import * as protocol from "./index.js";
 import {
   formatValidationErrors,
+  validateChannelsPairingApproveParams,
+  validateChannelsPairingListParams,
   validateChatEvent,
+  validateChatSendParams,
   validateCommandsListParams,
   validateConnectParams,
   validateModelsListParams,
@@ -49,6 +52,29 @@ describe("lazy protocol validators", () => {
     expect(validateCommandsListParams({ includeArgs: true })).toBe(true);
     expect(validateCommandsListParams({ includeArgs: "yes" })).toBe(false);
     expect(formatValidationErrors(validateCommandsListParams.errors)).toContain("must be boolean");
+  });
+
+  it("validates Genie channel-pairing and custom-instruction chat params", () => {
+    expect(validateChannelsPairingListParams({ channel: "telegram" })).toBe(true);
+    expect(validateChannelsPairingApproveParams({ channel: "telegram", code: "ABCD2345" })).toBe(
+      true,
+    );
+    expect(
+      validateChatSendParams({
+        sessionKey: "agent:main:main",
+        message: "hello",
+        idempotencyKey: "idem-1",
+        customInstructions: "Prefer short answers.",
+      }),
+    ).toBe(true);
+    expect(
+      validateChatSendParams({
+        sessionKey: "agent:main:main",
+        message: "hello",
+        idempotencyKey: "idem-1",
+        customInstructions: "x".repeat(1001),
+      }),
+    ).toBe(false);
   });
 
   it("keeps validation errors readable on the exported validator", () => {

@@ -467,6 +467,7 @@ describe("gateway server chat", () => {
               sessionKey: "main",
               message: "see image",
               idempotencyKey: `idem-configured-image-model-${id}`,
+              customInstructions: "  Prefer compact replies.  ",
               attachments: [
                 {
                   type: "image",
@@ -481,6 +482,7 @@ describe("gateway server chat", () => {
             sessionKey: "main",
             message: "see image",
             idempotencyKey: `idem-configured-image-model-${id}`,
+            customInstructions: "  Prefer compact replies.  ",
             attachments: [
               {
                 type: "image",
@@ -506,6 +508,7 @@ describe("gateway server chat", () => {
         expect(captured?.ctx?.MediaType).toBe("image/png");
         expect(captured?.ctx?.MediaTypes).toEqual(["image/png"]);
         expect(captured?.ctx?.MediaStaged).toBe(true);
+        expect(captured?.ctx?.CustomInstructions).toBe("Prefer compact replies.");
         await vi.waitFor(() => expect(context.removeChatRun).toHaveBeenCalledTimes(1));
       } finally {
         dispatchInboundMessageMock.mockReset();

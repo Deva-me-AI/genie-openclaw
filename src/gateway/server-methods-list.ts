@@ -47,6 +47,7 @@ export const GATEWAY_EVENTS = [
   "cron",
   "node.pair.requested",
   "node.pair.resolved",
+  "channels.pairing.approved",
   "node.invoke.request",
   "device.pair.requested",
   "device.pair.resolved",

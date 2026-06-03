@@ -48,6 +48,7 @@ export const ChatSendParamsSchema = Type.Object(
     timeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
     systemInputProvenance: Type.Optional(InputProvenanceSchema),
     systemProvenanceReceipt: Type.Optional(Type.String()),
+    customInstructions: Type.Optional(Type.String({ maxLength: 1000 })),
     idempotencyKey: NonEmptyString,
   },
   { additionalProperties: false },

@@ -60,6 +60,10 @@ import {
   ChannelsStopParamsSchema,
   type ChannelsLogoutParams,
   ChannelsLogoutParamsSchema,
+  type ChannelsPairingApproveParams,
+  ChannelsPairingApproveParamsSchema,
+  type ChannelsPairingListParams,
+  ChannelsPairingListParamsSchema,
   type TalkEvent,
   TalkEventSchema,
   type TalkCatalogParams,
@@ -714,6 +718,12 @@ export const validateChannelsStopParams = lazyCompile<ChannelsStopParams>(Channe
 export const validateChannelsLogoutParams = lazyCompile<ChannelsLogoutParams>(
   ChannelsLogoutParamsSchema,
 );
+export const validateChannelsPairingListParams = lazyCompile<ChannelsPairingListParams>(
+  ChannelsPairingListParamsSchema,
+);
+export const validateChannelsPairingApproveParams = lazyCompile<ChannelsPairingApproveParams>(
+  ChannelsPairingApproveParamsSchema,
+);
 export const validateModelsListParams = lazyCompile<ModelsListParams>(ModelsListParamsSchema);
 export const validateSkillsStatusParams = lazyCompile<SkillsStatusParams>(SkillsStatusParamsSchema);
 export const validateToolsCatalogParams = lazyCompile<ToolsCatalogParams>(ToolsCatalogParamsSchema);
@@ -1005,6 +1015,8 @@ export {
   ChannelsStartParamsSchema,
   ChannelsStopParamsSchema,
   ChannelsLogoutParamsSchema,
+  ChannelsPairingListParamsSchema,
+  ChannelsPairingApproveParamsSchema,
   WebLoginStartParamsSchema,
   WebLoginWaitParamsSchema,
   AgentSummarySchema,
@@ -1146,6 +1158,8 @@ export type {
   ChannelsStartParams,
   ChannelsStopParams,
   ChannelsLogoutParams,
+  ChannelsPairingListParams,
+  ChannelsPairingApproveParams,
   WebLoginStartParams,
   WebLoginWaitParams,
   AgentSummary,
