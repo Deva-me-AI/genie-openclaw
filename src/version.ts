@@ -3,7 +3,7 @@ import { normalizeOptionalString } from "./shared/string-coerce.js";
 
 // oxlint-disable-next-line eslint/no-underscore-dangle -- Bundled builds replace this compile-time define identifier.
 declare const __OPENCLAW_VERSION__: string | undefined;
-const CORE_PACKAGE_NAME = "openclaw";
+const CORE_PACKAGE_NAMES = new Set(["openclaw", "@bitplanet/genie-openclaw"]);
 
 const PACKAGE_JSON_CANDIDATES = [
   "../package.json",
@@ -32,7 +32,7 @@ function readVersionFromJsonCandidates(
         if (!version) {
           continue;
         }
-        if (opts.requirePackageName && parsed.name !== CORE_PACKAGE_NAME) {
+        if (opts.requirePackageName && !CORE_PACKAGE_NAMES.has(parsed.name ?? "")) {
           continue;
         }
         return version;

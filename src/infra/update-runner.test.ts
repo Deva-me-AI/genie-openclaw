@@ -126,9 +126,12 @@ describe("runGatewayUpdate", () => {
     };
   }
 
-  async function setupGitCheckout(options?: { packageManager?: string }) {
+  async function setupGitCheckout(options?: { packageManager?: string; packageName?: string }) {
     await fs.mkdir(path.join(tempDir, ".git"));
-    const pkg: Record<string, string> = { name: "openclaw", version: "1.0.0" };
+    const pkg: Record<string, string> = {
+      name: options?.packageName ?? "openclaw",
+      version: "1.0.0",
+    };
     if (options?.packageManager) {
       pkg.packageManager = options.packageManager;
     }
@@ -366,6 +369,19 @@ describe("runGatewayUpdate", () => {
     expect(result.status).toBe("skipped");
     expect(result.reason).toBe("dirty");
     expect(calls.filter((call) => call.includes("rebase"))).toEqual([]);
+  });
+
+  it("recognizes the Genie package name as an openclaw checkout root", async () => {
+    await setupGitCheckout({ packageName: "@bitplanet/genie-openclaw" });
+    const { runner, calls } = createRunner({
+      ...buildGitWorktreeProbeResponses({ status: " M README.md" }),
+    });
+
+    const result = await runWithRunner(runner);
+
+    expect(result.status).toBe("skipped");
+    expect(result.reason).toBe("dirty");
+    expect(calls.filter((call) => call.includes("status --porcelain")).length).toBe(1);
   });
 
   it("uses the supplied update cwd when the process cwd disappeared", async () => {

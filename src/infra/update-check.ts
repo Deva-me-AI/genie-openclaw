@@ -4,8 +4,11 @@ import { runCommandWithTimeout } from "../process/exec.js";
 import { fetchWithTimeout } from "../utils/fetch-timeout.js";
 import { detectPackageManager as detectPackageManagerImpl } from "./detect-package-manager.js";
 import { compareOpenClawReleaseVersions } from "./npm-registry-spec.js";
+import { readPackageName } from "./package-json.js";
 import { compareComparableSemver, parseComparableSemver } from "./semver-compare.js";
 import { channelToNpmTag, type UpdateChannel } from "./update-channels.js";
+
+const DEFAULT_PACKAGE_NAME = "@bitplanet/genie-openclaw";
 
 export type PackageManager = "pnpm" | "bun" | "npm" | "unknown";
 
@@ -296,8 +299,13 @@ export async function checkDepsStatus(params: {
 
 export async function fetchNpmLatestVersion(params?: {
   timeoutMs?: number;
+  packageName?: string;
 }): Promise<RegistryStatus> {
-  const res = await fetchNpmTagVersion({ tag: "latest", timeoutMs: params?.timeoutMs });
+  const res = await fetchNpmTagVersion({
+    tag: "latest",
+    timeoutMs: params?.timeoutMs,
+    packageName: params?.packageName,
+  });
   return {
     latestVersion: res.version,
     error: res.error,
@@ -307,10 +315,12 @@ export async function fetchNpmLatestVersion(params?: {
 export async function fetchNpmRegistryVersionForChannel(params: {
   channel: UpdateChannel;
   timeoutMs?: number;
+  packageName?: string;
 }): Promise<RegistryStatus> {
   const res = await resolveNpmChannelTag({
     channel: params.channel,
     timeoutMs: params.timeoutMs,
+    packageName: params.packageName,
   });
   return {
     latestVersion: res.version,
@@ -321,12 +331,14 @@ export async function fetchNpmRegistryVersionForChannel(params: {
 export async function fetchNpmPackageTargetStatus(params: {
   target: string;
   timeoutMs?: number;
+  packageName?: string;
 }): Promise<NpmPackageTargetStatus> {
   const timeoutMs = params.timeoutMs ?? 3500;
   const target = params.target;
+  const packageName = params.packageName ?? DEFAULT_PACKAGE_NAME;
   try {
     const res = await fetchWithTimeout(
-      `https://registry.npmjs.org/openclaw/${encodeURIComponent(target)}`,
+      `https://registry.npmjs.org/${encodeURIComponent(packageName)}/${encodeURIComponent(target)}`,
       {},
       Math.max(250, timeoutMs),
     );
@@ -348,10 +360,12 @@ export async function fetchNpmPackageTargetStatus(params: {
 export async function fetchNpmTagVersion(params: {
   tag: string;
   timeoutMs?: number;
+  packageName?: string;
 }): Promise<NpmTagStatus> {
   const res = await fetchNpmPackageTargetStatus({
     target: params.tag,
     timeoutMs: params.timeoutMs,
+    packageName: params.packageName,
   });
   return {
     tag: params.tag,
@@ -363,14 +377,24 @@ export async function fetchNpmTagVersion(params: {
 export async function resolveNpmChannelTag(params: {
   channel: UpdateChannel;
   timeoutMs?: number;
+  packageName?: string;
 }): Promise<{ tag: string; version: string | null }> {
   const channelTag = channelToNpmTag(params.channel);
-  const channelStatus = await fetchNpmTagVersion({ tag: channelTag, timeoutMs: params.timeoutMs });
+  const packageName = params.packageName;
+  const channelStatus = await fetchNpmTagVersion({
+    tag: channelTag,
+    timeoutMs: params.timeoutMs,
+    packageName,
+  });
   if (params.channel !== "beta") {
     return { tag: channelTag, version: channelStatus.version };
   }
 
-  const latestStatus = await fetchNpmTagVersion({ tag: "latest", timeoutMs: params.timeoutMs });
+  const latestStatus = await fetchNpmTagVersion({
+    tag: "latest",
+    timeoutMs: params.timeoutMs,
+    packageName,
+  });
   if (!latestStatus.version) {
     return { tag: channelTag, version: channelStatus.version };
   }
@@ -405,13 +429,14 @@ export async function checkUpdateStatus(params: {
   registryChannel?: UpdateChannel;
 }): Promise<UpdateCheckResult> {
   const timeoutMs = params.timeoutMs ?? 6000;
-  const fetchRegistry = () =>
+  const fetchRegistry = (packageName?: string) =>
     params.registryChannel
       ? fetchNpmRegistryVersionForChannel({
           channel: params.registryChannel,
           timeoutMs,
+          packageName,
         })
-      : fetchNpmLatestVersion({ timeoutMs });
+      : fetchNpmLatestVersion({ timeoutMs, packageName });
   const root = params.root ? path.resolve(params.root) : null;
   if (!root) {
     return {
@@ -423,10 +448,11 @@ export async function checkUpdateStatus(params: {
   }
 
   const rootRealpath = await fs.realpath(root).catch(() => root);
+  const packageName = (await readPackageName(root)) ?? DEFAULT_PACKAGE_NAME;
   const [pm, gitRoot, registry] = await Promise.all([
     detectPackageManager(root),
     detectGitRoot(root),
-    params.includeRegistry ? fetchRegistry() : Promise.resolve(undefined),
+    params.includeRegistry ? fetchRegistry(packageName) : Promise.resolve(undefined),
   ]);
   const isGit = gitRoot && path.resolve(gitRoot) === path.resolve(rootRealpath);
 

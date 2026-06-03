@@ -375,6 +375,9 @@ describe("update-cli", () => {
   let fixtureCount = 0;
   const tempDirsToCleanup = new Set<string>();
 
+  const scopedGeniePackageRoot = (nodeModulesRoot: string) =>
+    path.join(nodeModulesRoot, "@bitplanet", "genie-openclaw");
+
   const createCaseDir = (prefix: string) => {
     const dir = path.join(fixtureRoot, `${prefix}-${fixtureCount++}`);
     // Tests only need a stable path; the directory does not have to exist because all I/O is mocked.
@@ -1968,7 +1971,7 @@ describe("update-cli", () => {
           expect(call?.tag).toBe(expectedTag);
         }
       } else {
-        expectPackageInstallSpec("openclaw@latest");
+        expectPackageInstallSpec("@bitplanet/genie-openclaw@latest");
       }
 
       if (expectedPersistedChannel !== undefined) {
@@ -1995,7 +1998,7 @@ describe("update-cli", () => {
     });
     await updateCommand({});
 
-    expectPackageInstallSpec("openclaw@latest");
+    expectPackageInstallSpec("@bitplanet/genie-openclaw@latest");
   });
 
   it("refreshes package-manager updates when the installed version already matches the target", async () => {
@@ -2033,7 +2036,7 @@ describe("update-cli", () => {
 
     await updateCommand({ yes: true });
 
-    expectPackageInstallSpec("openclaw@latest");
+    expectPackageInstallSpec("@bitplanet/genie-openclaw@latest");
     expect(defaultRuntime.exit).not.toHaveBeenCalledWith(1);
     expect(
       vi
@@ -2067,7 +2070,7 @@ describe("update-cli", () => {
         "Run `openclaw update` from a shell outside the gateway service, or stop the gateway service first and then update.",
       ].join("\n"),
     );
-    expectPackageInstallSpec("openclaw@latest");
+    expectPackageInstallSpec("@bitplanet/genie-openclaw@latest");
   });
 
   it("refuses package updates from inherited gateway service env when --no-restart leaves the gateway running", async () => {
@@ -2248,7 +2251,7 @@ describe("update-cli", () => {
     const errors = vi.mocked(defaultRuntime.error).mock.calls.map((call) => String(call[0]));
     expect(errors.join("\n")).toContain("Node ");
     expect(errors.join("\n")).toContain(
-      "Bare `npm i -g openclaw` can silently install an older compatible release.",
+      "Bare `npm i -g @bitplanet/genie-openclaw` can silently install an older compatible release.",
     );
   });
 
@@ -2259,7 +2262,7 @@ describe("update-cli", () => {
         mockPackageInstallStatus(createCaseDir("openclaw-update"));
         await updateCommand({ tag: "next" });
       },
-      expectedSpec: "openclaw@next",
+      expectedSpec: "@bitplanet/genie-openclaw@next",
     },
     {
       name: "main shorthand",
@@ -2443,11 +2446,11 @@ describe("update-cli", () => {
         if (typeof stagePrefix !== "string") {
           throw new Error("missing stage prefix");
         }
-        const stageRoot = path.join(stagePrefix, "lib", "node_modules", "openclaw");
+        const stageRoot = scopedGeniePackageRoot(path.join(stagePrefix, "lib", "node_modules"));
         await fs.mkdir(path.join(stageRoot, "dist"), { recursive: true });
         await fs.writeFile(
           path.join(stageRoot, "package.json"),
-          JSON.stringify({ name: "openclaw", version: "2026.4.25" }),
+          JSON.stringify({ name: "@bitplanet/genie-openclaw", version: "2026.4.25" }),
           "utf-8",
         );
         await fs.writeFile(path.join(stageRoot, "dist", "index.js"), "export {};\n", "utf-8");
@@ -2579,17 +2582,14 @@ describe("update-cli", () => {
       }
       if (argv[0] === "npm" && argv[1] === "i" && argv.includes("--prefix")) {
         const stagePrefix = argv[argv.indexOf("--prefix") + 1];
-        const stagePackageRoot = path.join(
-          requireValue(stagePrefix, "stage prefix"),
-          "lib",
-          "node_modules",
-          "openclaw",
+        const stagePackageRoot = scopedGeniePackageRoot(
+          path.join(requireValue(stagePrefix, "stage prefix"), "lib", "node_modules"),
         );
         const stageEntryPath = path.join(stagePackageRoot, "dist", "index.js");
         await fs.mkdir(path.dirname(stageEntryPath), { recursive: true });
         await fs.writeFile(
           path.join(stagePackageRoot, "package.json"),
-          JSON.stringify({ name: "openclaw", version: "2026.5.14" }),
+          JSON.stringify({ name: "@bitplanet/genie-openclaw", version: "2026.5.14" }),
           "utf-8",
         );
         await fs.writeFile(stageEntryPath, "export {};\n", "utf-8");
@@ -2903,7 +2903,7 @@ describe("update-cli", () => {
 
     await updateCommand({ yes: true, restart: false });
 
-    expectPackageInstallSpec("openclaw@latest");
+    expectPackageInstallSpec("@bitplanet/genie-openclaw@latest");
     const doctorCall = doctorCommandCall();
     expect(doctorCall?.[0][0]).toContain("node");
     expect(doctorCall?.[0].slice(1)).toEqual([entryPath, "doctor", "--non-interactive", "--fix"]);
@@ -2980,7 +2980,7 @@ describe("update-cli", () => {
         "npm",
         "i",
         "-g",
-        "openclaw@latest",
+        "@bitplanet/genie-openclaw@latest",
         "--no-fund",
         "--no-audit",
         "--loglevel=error",
@@ -2990,7 +2990,7 @@ describe("update-cli", () => {
         "npm",
         "i",
         "-g",
-        "openclaw@latest",
+        "@bitplanet/genie-openclaw@latest",
         "--omit=optional",
         "--no-fund",
         "--no-audit",
@@ -3069,7 +3069,7 @@ describe("update-cli", () => {
           isOwningNpmCommand(argv[0], brewPrefix) &&
           argv[1] === "i" &&
           argv[2] === "-g" &&
-          argv.includes("openclaw@latest"),
+          argv.includes("@bitplanet/genie-openclaw@latest"),
       );
 
     const requiredInstallCall = requireValue(installCall, "brew npm install call");
@@ -3358,13 +3358,13 @@ describe("update-cli", () => {
           ? argv[argv.indexOf("--prefix") + 1]
           : undefined;
         const stageRoot = stagePrefix
-          ? path.join(stagePrefix, "lib", "node_modules", "openclaw")
+          ? scopedGeniePackageRoot(path.join(stagePrefix, "lib", "node_modules"))
           : serviceRoot;
         const stageEntryPoint = path.join(stageRoot, "dist", "index.js");
         await fs.mkdir(path.dirname(stageEntryPoint), { recursive: true });
         await fs.writeFile(
           path.join(stageRoot, "package.json"),
-          JSON.stringify({ name: "openclaw", version: "2026.5.20" }),
+          JSON.stringify({ name: "@bitplanet/genie-openclaw", version: "2026.5.20" }),
           "utf-8",
         );
         await fs.writeFile(stageEntryPoint, "export {};\n", "utf-8");
@@ -3484,13 +3484,13 @@ describe("update-cli", () => {
           ? argv[argv.indexOf("--prefix") + 1]
           : undefined;
         const stageRoot = stagePrefix
-          ? path.join(stagePrefix, "lib", "node_modules", "openclaw")
+          ? scopedGeniePackageRoot(path.join(stagePrefix, "lib", "node_modules"))
           : root;
         const stageEntryPoint = path.join(stageRoot, "dist", "index.js");
         await fs.mkdir(path.dirname(stageEntryPoint), { recursive: true });
         await fs.writeFile(
           path.join(stageRoot, "package.json"),
-          JSON.stringify({ name: "openclaw", version: "2026.5.20" }),
+          JSON.stringify({ name: "@bitplanet/genie-openclaw", version: "2026.5.20" }),
           "utf-8",
         );
         await fs.writeFile(stageEntryPoint, "export {};\n", "utf-8");
@@ -3583,13 +3583,13 @@ describe("update-cli", () => {
         const prefixIdx = argv.indexOf("--prefix");
         const stagePrefix = prefixIdx >= 0 ? argv[prefixIdx + 1] : undefined;
         const stageRoot = stagePrefix
-          ? path.join(stagePrefix, "lib", "node_modules", "openclaw")
+          ? scopedGeniePackageRoot(path.join(stagePrefix, "lib", "node_modules"))
           : root;
         const stageEntryPoint = path.join(stageRoot, "dist", "index.js");
         await fs.mkdir(path.dirname(stageEntryPoint), { recursive: true });
         await fs.writeFile(
           path.join(stageRoot, "package.json"),
-          JSON.stringify({ name: "openclaw", version: "2026.5.20" }),
+          JSON.stringify({ name: "@bitplanet/genie-openclaw", version: "2026.5.20" }),
           "utf-8",
         );
         await fs.writeFile(stageEntryPoint, "export {};\n", "utf-8");

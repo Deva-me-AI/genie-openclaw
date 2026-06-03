@@ -8,7 +8,7 @@ import type {
 import { defaultRuntime } from "../../runtime.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { theme } from "../../terminal/theme.js";
-import type { UpdateCommandOptions } from "./shared.js";
+import { DEFAULT_PACKAGE_NAME, type UpdateCommandOptions } from "./shared.js";
 
 const STEP_LABELS: Record<string, string> = {
   "clean check": "Working directory is clean",
@@ -88,9 +88,11 @@ export function inferUpdateFailureHints(result: UpdateRunResult): string[] {
     hints.push(
       "If you recover with sudo/manual package install on a managed Gateway, stop the Gateway first so it does not load files while the package tree is being replaced.",
     );
-    hints.push("Example: npm config set prefix ~/.local && npm i -g openclaw@latest");
     hints.push(
-      "System install outline: openclaw gateway stop -> sudo <system-npm> i -g openclaw@latest -> openclaw gateway install --force -> openclaw gateway restart.",
+      `Example: npm config set prefix ~/.local && npm i -g ${DEFAULT_PACKAGE_NAME}@latest`,
+    );
+    hints.push(
+      `System install outline: openclaw gateway stop -> sudo <system-npm> i -g ${DEFAULT_PACKAGE_NAME}@latest -> openclaw gateway install --force -> openclaw gateway restart.`,
     );
   }
 
@@ -101,7 +103,7 @@ export function inferUpdateFailureHints(result: UpdateRunResult): string[] {
     hints.push(
       "Detected native optional dependency build failure. The updater retries with --omit=optional automatically.",
     );
-    hints.push("If it still fails: npm i -g openclaw@latest --omit=optional");
+    hints.push(`If it still fails: npm i -g ${DEFAULT_PACKAGE_NAME}@latest --omit=optional`);
   }
 
   return hints;

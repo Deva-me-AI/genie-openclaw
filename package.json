@@ -1,17 +1,17 @@
 {
-  "name": "openclaw",
+  "name": "@bitplanet/genie-openclaw",
   "version": "2026.5.28",
   "description": "Multi-channel AI gateway with extensible messaging integrations",
   "keywords": [],
-  "homepage": "https://github.com/openclaw/openclaw#readme",
+  "homepage": "https://github.com/Deva-me-AI/genie-openclaw#readme",
   "bugs": {
-    "url": "https://github.com/openclaw/openclaw/issues"
+    "url": "https://github.com/Deva-me-AI/genie-openclaw/issues"
   },
   "license": "MIT",
   "author": "",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openclaw/openclaw.git"
+    "url": "git+https://github.com/Deva-me-AI/genie-openclaw.git"
   },
   "bin": {
     "openclaw": "openclaw.mjs"
@@ -147,6 +147,10 @@
   ],
   "type": "module",
   "main": "dist/index.js",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "exports": {
     ".": "./dist/index.js",
     "./plugin-sdk": {
