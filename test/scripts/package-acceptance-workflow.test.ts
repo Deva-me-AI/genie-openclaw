@@ -200,7 +200,7 @@ describe("package acceptance workflow", () => {
     expect(hydrateWindowsFetch.run).not.toContain("StandardError.ReadToEnd()");
     expect(hydrateWindowsFetch.run).toContain("git fetch failed with exit code $($fetch.ExitCode)");
     expect(hydrateWindowsFetch.run).toContain(
-      '--no-tags --no-progress --prune --no-recurse-submodules --depth=50',
+      "--no-tags --no-progress --prune --no-recurse-submodules --depth=50",
     );
     expect(hydrateWindowsFetch.run).toContain('"+refs/heads/main:refs/remotes/origin/main"');
     expect(workflowStep(hydrateWindowsDaemon, "Mark Crabbox ready").shell).toBe("powershell");
@@ -373,7 +373,13 @@ describe("package acceptance workflow", () => {
     expect(workflow).toContain("default: all-since-2026.4.23");
     expect(workflow).toContain("default: plugin-deps-cleanup");
     expect(workflow).toContain("telegram_mode: none");
-    expect(workflow).toContain("secrets: inherit");
+    expect(workflow).not.toContain("secrets: inherit");
+    expect(workflow).toContain(
+      "OPENCLAW_TRUSTED_PACKAGE_TOKEN: ${{ secrets.OPENCLAW_TRUSTED_PACKAGE_TOKEN }}",
+    );
+    expect(workflow).toContain(
+      "OPENCLAW_QA_CONVEX_SECRET_CI: ${{ secrets.OPENCLAW_QA_CONVEX_SECRET_CI }}",
+    );
     expect(packageWorkflow).toContain("published-upgrade-survivor/update-migration");
   });
 });

@@ -6,6 +6,10 @@ function readCiWorkflow() {
   return parse(readFileSync(".github/workflows/ci.yml", "utf8"));
 }
 
+function readClaudeReviewWorkflow() {
+  return parse(readFileSync(".github/workflows/claude-code-review.yml", "utf8"));
+}
+
 describe("ci workflow guards", () => {
   it("kills timed manual checkout fetches after the grace period", () => {
     const workflowPaths = [
@@ -96,7 +100,7 @@ describe("ci workflow guards", () => {
     expect(workflow).not.toContain("$fetchInfo.RedirectStandardOutput = $true");
     expect(workflow).not.toContain("$fetchInfo.RedirectStandardError = $true");
     expect(workflow).toContain(
-      '--no-tags --no-progress --prune --no-recurse-submodules --depth=50',
+      "--no-tags --no-progress --prune --no-recurse-submodules --depth=50",
     );
     expect(workflow).toContain("$fetch = New-Object System.Diagnostics.Process");
     expect(workflow).toContain("$fetch.StartInfo = $fetchInfo");
@@ -171,6 +175,7 @@ describe("ci workflow guards", () => {
 
     const writeStep = timingJob.steps.find((step) => step.name === "Write CI timing summary");
     expect(writeStep.env).toMatchObject({ GH_TOKEN: "${{ github.token }}" });
+    expect(writeStep.run).toContain("CI timing summary helper is unavailable");
     expect(writeStep.run).toContain(
       'node scripts/ci-run-timings.mjs "$GITHUB_RUN_ID" --limit 25 > ci-timings-summary.txt',
     );
@@ -192,6 +197,25 @@ describe("ci workflow guards", () => {
     expect(workflow).toContain("path: clawhub-source");
     expect(workflow).toContain(
       "OPENCLAW_DOCS_SYNC_CLAWHUB_REPO: ${{ github.workspace }}/clawhub-source",
+    );
+  });
+
+  it("skips automatic Claude review when the review workflow changed", () => {
+    const workflow = readClaudeReviewWorkflow();
+    const steps = workflow.jobs["claude-review"].steps;
+
+    const trustStep = steps.find((step) => step.name === "Check Claude review workflow trust");
+    expect(trustStep.if).toBe("github.event_name == 'pull_request'");
+    expect(trustStep.env.BASE_SHA).toBe("${{ github.event.pull_request.base.sha }}");
+    expect(trustStep.run).toContain(
+      'git diff --quiet "$BASE_SHA" HEAD -- .github/workflows/claude-code-review.yml',
+    );
+    expect(trustStep.run).toContain("workflow_matches_base=false");
+    expect(trustStep.run).toContain("Claude review skipped because this PR changes");
+
+    const reviewStep = steps.find((step) => step.name === "Run Claude Code Review");
+    expect(reviewStep.if).toBe(
+      "github.event_name != 'pull_request' || steps.workflow-trust.outputs.workflow_matches_base == 'true'",
     );
   });
 });
