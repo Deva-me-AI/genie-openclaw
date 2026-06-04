@@ -91,6 +91,26 @@ grep -rn '"openclaw"' src packages --include='*.ts' \
 
 ## Publish + ship
 
+- **Stable release tags collide with the upstream tag — recreate at the fork tip
+  before pushing.** Step 1 of the Procedure runs `git fetch upstream tag vYYYY.M.D`,
+  which creates a LOCAL annotated tag `vYYYY.M.D` (tagger "Peter Steinberger",
+  `package.json` name `openclaw`) on the upstream base commit — an ancestor of the
+  fork tip. Creating the fork's release tag of the same name then fails with
+  `fatal: tag 'vYYYY.M.D' already exists`. Do NOT force-push that tag: the publish
+  workflow would build the upstream tree (name `openclaw`, no fork delta). Replace it:
+
+  ```bash
+  git tag -d vYYYY.M.D                                   # re-fetchable from upstream
+  git tag -a vYYYY.M.D <fork-tip-sha> -m "genie-openclaw vYYYY.M.D — rebase onto upstream stable vYYYY.M.D"
+  git rev-parse vYYYY.M.D^{commit}                       # MUST equal the fork tip
+  git show vYYYY.M.D:package.json | grep '"name"'        # MUST be @bitplanet/genie-openclaw
+  git push origin vYYYY.M.D
+  ```
+
+  Only stable tags collide; `-beta.N` tags do not (upstream has no such suffix). The
+  published npm version comes from `package.json`, not the tag; the tag name only
+  routes the dist-tag (`-` in name -> `beta`, else -> `latest`).
+
 - npm publish runs on `git push` of a `v*` tag via `.github/workflows/npm-publish.yml`
   (OIDC trusted publisher must point at `Deva-me-AI/genie-openclaw`). Prerelease
   tags (`-beta.N`) route to the `beta` dist-tag; stable tags to `latest`.
