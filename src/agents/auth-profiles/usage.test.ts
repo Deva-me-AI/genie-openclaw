@@ -841,8 +841,7 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
           primary_window: { used_percent: 100, reset_after_seconds: 7_200 },
         },
       },
-      expectedMs: 7_200_000,
-      exactBlocked: true,
+      expectedMs: 300_000,
     },
     {
       label: "team rolling window",
@@ -853,8 +852,7 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
           secondary_window: { used_percent: 85, reset_after_seconds: 201_600 },
         },
       },
-      expectedMs: 7_200_000,
-      exactBlocked: true,
+      expectedMs: 300_000,
     },
     {
       label: "team weekly window",
@@ -865,10 +863,9 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
           secondary_window: { used_percent: 100, reset_after_seconds: 28_800 },
         },
       },
-      expectedMs: 28_800_000,
-      exactBlocked: true,
+      expectedMs: 300_000,
     },
-  ])("maps $label to the expected cooldown", async ({ response, expectedMs, exactBlocked }) => {
+  ])("maps $label to the expected cooldown", async ({ response, expectedMs }) => {
     const now = 1_700_000_000_000;
     const store = makeStore({});
     mockWhamResponse(200, response);
@@ -885,13 +882,61 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     expect(headers.originator).toBe("openclaw");
     expect(headers["User-Agent"]).toMatch(/^openclaw\//);
     const stats = store.usageStats?.["openai-codex:default"];
-    if (exactBlocked) {
-      expect(stats?.blockedUntil).toBe(now + expectedMs);
-      expect(stats?.blockedReason).toBe("subscription_limit");
-      expect(stats?.cooldownUntil).toBeUndefined();
-    } else {
-      expect(stats?.cooldownUntil).toBe(now + expectedMs);
-    }
+    expect(stats?.blockedUntil).toBeUndefined();
+    expect(stats?.blockedReason).toBeUndefined();
+    expect(stats?.cooldownUntil).toBe(now + expectedMs);
+  });
+
+  it("caps multi-day WHAM reset windows to the normal rate-limit cooldown lane", async () => {
+    const now = 1_700_000_000_000;
+    const reportedMinutes = 27_195;
+    const store = makeStore({});
+    mockWhamResponse(200, {
+      rate_limit: {
+        limit_reached: true,
+        primary_window: {
+          used_percent: 100,
+          reset_after_seconds: reportedMinutes * 60,
+        },
+      },
+    });
+
+    await markCodexFailureAt({ store, now });
+
+    const stats = store.usageStats?.["openai-codex:default"];
+    expect(stats?.blockedUntil).toBeUndefined();
+    expect(stats?.blockedReason).toBeUndefined();
+    expect(stats?.cooldownUntil).toBe(now + 5 * 60_000);
+    expect(stats?.cooldownReason).toBe("rate_limit");
+  });
+
+  it("clears stale WHAM blocked windows on the next WHAM rate-limit update", async () => {
+    const now = 1_700_000_000_000;
+    const staleBlockedUntil = now + 27_195 * 60_000;
+    const store = makeStore({
+      "openai-codex:default": {
+        blockedUntil: staleBlockedUntil,
+        blockedReason: "subscription_limit",
+        blockedSource: "wham",
+        errorCount: 1,
+        failureCounts: { rate_limit: 1 },
+        lastFailureAt: now - 60_000,
+      },
+    });
+    mockWhamResponse(200, {
+      rate_limit: {
+        limit_reached: false,
+        primary_window: { used_percent: 42, reset_after_seconds: 900 },
+      },
+    });
+
+    await markCodexFailureAt({ store, now });
+
+    const stats = store.usageStats?.["openai-codex:default"];
+    expect(stats?.blockedUntil).toBeUndefined();
+    expect(stats?.blockedReason).toBeUndefined();
+    expect(stats?.blockedSource).toBeUndefined();
+    expect(stats?.cooldownUntil).toBe(now + 15_000);
   });
 
   it("maps HTTP 401 to a 12h cooldown", async () => {
