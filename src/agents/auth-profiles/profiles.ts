@@ -13,7 +13,7 @@ export { dedupeProfileIds, listProfilesForProvider } from "./profile-list.js";
 
 function resetSuccessfulUsageStats(
   existing: ProfileUsageStats | undefined,
-  lastUsed: number,
+  lastUsed?: number,
 ): ProfileUsageStats {
   return {
     ...existing,
@@ -28,7 +28,7 @@ function resetSuccessfulUsageStats(
     disabledUntil: undefined,
     disabledReason: undefined,
     failureCounts: undefined,
-    lastUsed,
+    ...(lastUsed !== undefined ? { lastUsed } : {}),
   };
 }
 
@@ -39,6 +39,13 @@ function updateSuccessfulUsageStatsEntry(
 ): void {
   store.usageStats = store.usageStats ?? {};
   store.usageStats[profileId] = resetSuccessfulUsageStats(store.usageStats[profileId], lastUsed);
+}
+
+function clearUsageStatsEntryForCredentialUpsert(store: AuthProfileStore, profileId: string): void {
+  if (!store.usageStats?.[profileId]) {
+    return;
+  }
+  store.usageStats[profileId] = resetSuccessfulUsageStats(store.usageStats[profileId]);
 }
 
 export async function setAuthProfileOrder(params: {
@@ -137,6 +144,7 @@ export function upsertAuthProfile(params: {
   const credential = normalizeAuthProfileCredential(params.credential);
   const store = ensureAuthProfileStoreForLocalUpdate(params.agentDir);
   store.profiles[params.profileId] = credential;
+  clearUsageStatsEntryForCredentialUpsert(store, params.profileId);
   saveAuthProfileStore(store, params.agentDir, {
     filterExternalAuthProfiles: false,
     syncExternalCli: false,
@@ -157,6 +165,7 @@ export async function upsertAuthProfileWithLock(params: {
     },
     updater: (store) => {
       store.profiles[params.profileId] = credential;
+      clearUsageStatsEntryForCredentialUpsert(store, params.profileId);
       return true;
     },
   });
