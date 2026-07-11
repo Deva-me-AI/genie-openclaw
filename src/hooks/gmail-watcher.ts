@@ -79,6 +79,9 @@ function spawnGogServe(cfg: GmailHookRuntimeConfig): ChildProcess {
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
 
+  child.stdout?.on("error", (err) => {
+    log.error(`gog stdout error: ${String(err)}`);
+  });
   child.stdout?.on("data", (data: Buffer) => {
     const line = data.toString().trim();
     if (line) {
@@ -86,6 +89,9 @@ function spawnGogServe(cfg: GmailHookRuntimeConfig): ChildProcess {
     }
   });
 
+  child.stderr?.on("error", (err) => {
+    log.error(`gog stderr error: ${String(err)}`);
+  });
   child.stderr?.on("data", (data: Buffer) => {
     const line = data.toString().trim();
     if (!line) {
@@ -138,8 +144,6 @@ function spawnGogServe(cfg: GmailHookRuntimeConfig): ChildProcess {
 function settleProcess(proc: ChildProcess): Promise<void> {
   return new Promise<void>((resolve) => {
     let settled = false;
-    let escalation: ReturnType<typeof setTimeout> | undefined;
-    let finalTimeout: ReturnType<typeof setTimeout> | undefined;
     const settle = () => {
       if (settled) {
         return;
@@ -156,7 +160,7 @@ function settleProcess(proc: ChildProcess): Promise<void> {
 
     proc.kill("SIGTERM");
 
-    escalation = setTimeout(() => {
+    const escalation: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
       try {
         proc.kill("SIGKILL");
       } catch {
@@ -164,7 +168,7 @@ function settleProcess(proc: ChildProcess): Promise<void> {
       }
     }, 3_000);
 
-    finalTimeout = setTimeout(() => {
+    const finalTimeout: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
       if (!settled) {
         log.warn("gog process did not exit after SIGKILL; giving up");
         settle();

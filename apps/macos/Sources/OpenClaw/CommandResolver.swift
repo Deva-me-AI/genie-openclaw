@@ -3,20 +3,20 @@ import Foundation
 enum CommandResolver {
     private static let projectRootDefaultsKey = "openclaw.gatewayProjectRootPath"
     private static let helperName = "openclaw"
-    static let strictHostKeyCheckingSSHOptions = [
-        "-o", "StrictHostKeyChecking=yes",
-    ]
-    static let updateHostKeysSSHOptions = [
-        "-o", "UpdateHostKeys=yes",
-    ]
 
     static func gatewayEntrypoint(in root: URL) -> String? {
         let distEntry = root.appendingPathComponent("dist/index.js").path
-        if FileManager().isReadableFile(atPath: distEntry) { return distEntry }
+        if FileManager().isReadableFile(atPath: distEntry) {
+            return distEntry
+        }
         let openclawEntry = root.appendingPathComponent("openclaw.mjs").path
-        if FileManager().isReadableFile(atPath: openclawEntry) { return openclawEntry }
+        if FileManager().isReadableFile(atPath: openclawEntry) {
+            return openclawEntry
+        }
         let binEntry = root.appendingPathComponent("bin/openclaw.js").path
-        if FileManager().isReadableFile(atPath: binEntry) { return binEntry }
+        if FileManager().isReadableFile(atPath: binEntry) {
+            return binEntry
+        }
         return nil
     }
 
@@ -80,29 +80,64 @@ enum CommandResolver {
             .split(separator: ":").map(String.init) ?? []
         let home = FileManager().homeDirectoryForCurrentUser
         let projectRoot = self.projectRoot()
-        return self.preferredPaths(home: home, current: current, projectRoot: projectRoot)
+        let validatedExecutable = self.validatedOpenClawExecutable(
+            defaults: .standard,
+            fileManager: .default,
+            requiredVersion: GatewayEnvironment.expectedGatewayVersionString())
+        return self.preferredPaths(
+            home: home,
+            current: current,
+            projectRoot: projectRoot,
+            validatedExecutable: validatedExecutable)
     }
 
-    static func preferredPaths(home: URL, current: [String], projectRoot: URL) -> [String] {
-        var extras = [
+    static func preferredPaths(
+        home: URL,
+        current: [String],
+        projectRoot: URL,
+        validatedExecutable: String? = nil) -> [String]
+    {
+        var preferredPaths: [String] = []
+        let managedPaths = self.openclawManagedPaths(home: home)
+        if let validatedExecutable {
+            let validatedBin = URL(fileURLWithPath: validatedExecutable).deletingLastPathComponent().path
+            if managedPaths.contains(validatedBin) {
+                preferredPaths.append(contentsOf: managedPaths)
+            } else {
+                preferredPaths.append(validatedBin)
+            }
+        }
+        let externalPaths = [
             home.appendingPathComponent("Library/pnpm").path,
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "/usr/bin",
             "/bin",
+            home.appendingPathComponent(".local/bin").path,
         ]
         #if DEBUG
         // Dev-only convenience. Avoid project-local PATH hijacking in release builds.
-        extras.insert(projectRoot.appendingPathComponent("node_modules/.bin").path, at: 0)
+        preferredPaths.insert(projectRoot.appendingPathComponent("node_modules/.bin").path, at: 0)
         #endif
-        let openclawPaths = self.openclawManagedPaths(home: home)
-        if !openclawPaths.isEmpty {
-            extras.insert(contentsOf: openclawPaths, at: 1)
-        }
-        extras.insert(contentsOf: self.nodeManagerBinPaths(home: home), at: 1 + openclawPaths.count)
         var seen = Set<String>()
+        let fallbackPaths = self.nodeManagerBinPaths(home: home) + externalPaths + managedPaths
         // Preserve order while stripping duplicates so PATH lookups remain deterministic.
-        return (extras + current).filter { seen.insert($0).inserted }
+        return (preferredPaths + fallbackPaths + current).filter { seen.insert($0).inserted }
+    }
+
+    static func validatedOpenClawExecutable(
+        defaults: UserDefaults,
+        fileManager: FileManager,
+        requiredVersion: String?) -> String?
+    {
+        guard let executable = defaults.string(forKey: cliValidatedExecutableKey),
+              fileManager.isExecutableFile(atPath: executable),
+              let validatedVersion = Semver.parse(defaults.string(forKey: cliValidatedVersionKey))
+        else {
+            return nil
+        }
+        guard let required = Semver.parse(requiredVersion) else { return executable }
+        return validatedVersion.compatible(with: required) ? executable : nil
     }
 
     private static func openclawManagedPaths(home: URL) -> [String] {
@@ -172,7 +207,9 @@ enum CommandResolver {
             for i in 0..<maxCount {
                 let ai = i < va.count ? va[i] : 0
                 let bi = i < vb.count ? vb[i] : 0
-                if ai != bi { return ai > bi }
+                if ai != bi {
+                    return ai > bi
+                }
             }
             // If identical numerically, keep stable ordering.
             return a > b
@@ -226,8 +263,12 @@ enum CommandResolver {
     }
 
     static func hasAnyOpenClawInvoker(searchPaths: [String]? = nil) -> Bool {
-        if self.openclawExecutable(searchPaths: searchPaths) != nil { return true }
-        if self.findExecutable(named: "pnpm", searchPaths: searchPaths) != nil { return true }
+        if self.openclawExecutable(searchPaths: searchPaths) != nil {
+            return true
+        }
+        if self.findExecutable(named: "pnpm", searchPaths: searchPaths) != nil {
+            return true
+        }
         if self.findExecutable(named: "node", searchPaths: searchPaths) != nil,
            self.nodeCliPath() != nil
         {
@@ -309,6 +350,15 @@ enum CommandResolver {
     }
 
     // MARK: - SSH helpers
+
+    static func sshEnvironment(
+        base: [String: String] = ProcessInfo.processInfo.environment,
+        searchPaths: [String]? = nil) -> [String: String]
+    {
+        var environment = base
+        environment["PATH"] = (searchPaths ?? self.preferredPaths()).joined(separator: ":")
+        return environment
+    }
 
     private static func sshNodeCommand(subcommand: String, extraArgs: [String], settings: RemoteSettings) -> [String]? {
         guard !settings.target.isEmpty else { return nil }
@@ -401,9 +451,10 @@ enum CommandResolver {
           echo "openclaw CLI missing on remote host"; exit 127;
         fi
         """
+        // Remote credentials require strict host verification unless config explicitly opts into OpenSSH policy.
         let options: [String] = [
             "-o", "BatchMode=yes",
-        ] + self.strictHostKeyCheckingSSHOptions + self.updateHostKeysSSHOptions
+        ] + settings.sshHostKeyPolicy.commandOptions
         let args = self.sshArguments(
             target: parsed,
             identity: settings.identity,
@@ -412,12 +463,39 @@ enum CommandResolver {
         return ["/usr/bin/ssh"] + args
     }
 
+    enum SSHHostKeyPolicy: String {
+        case strict
+        case openssh
+
+        var hostKeyOptions: [String] {
+            switch self {
+            case .strict:
+                [
+                    "-o", "StrictHostKeyChecking=yes",
+                    "-o", "UpdateHostKeys=yes",
+                ]
+            case .openssh:
+                []
+            }
+        }
+
+        var commandOptions: [String] {
+            [
+                "-o", "ControlMaster=no",
+                "-o", "ControlPath=none",
+                "-o", "ControlPersist=no",
+                "-o", "ForkAfterAuthentication=no",
+            ] + self.hostKeyOptions
+        }
+    }
+
     struct RemoteSettings {
         let mode: AppState.ConnectionMode
         let target: String
         let identity: String
         let projectRoot: String
         let cliPath: String
+        let sshHostKeyPolicy: SSHHostKeyPolicy
     }
 
     static func connectionSettings(
@@ -427,20 +505,31 @@ enum CommandResolver {
         let root = configRoot ?? OpenClawConfigFile.loadDict()
         let mode = ConnectionModeResolver.resolve(root: root, defaults: defaults).mode
         let remote = (root["gateway"] as? [String: Any])?["remote"] as? [String: Any]
-        let target = defaults.string(forKey: remoteTargetKey)?.nonEmpty
-            ?? remote?["sshTarget"] as? String
-            ?? ""
+        let configuredTarget = self.sanitizedTarget(remote?["sshTarget"] as? String ?? "")
+        let target = self.sanitizedTarget(
+            defaults.string(forKey: remoteTargetKey)?.nonEmpty ?? configuredTarget)
         let identity = defaults.string(forKey: remoteIdentityKey)?.nonEmpty
             ?? remote?["sshIdentity"] as? String
             ?? ""
         let projectRoot = defaults.string(forKey: remoteProjectRootKey)?.nonEmpty ?? ""
         let cliPath = defaults.string(forKey: remoteCliPathKey)?.nonEmpty ?? ""
+        let rawHostKeyPolicy = remote?["sshHostKeyPolicy"] as? String
+        let configuredHostKeyPolicy = rawHostKeyPolicy.flatMap(SSHHostKeyPolicy.init(rawValue:)) ?? .strict
+        let sshHostKeyPolicy: SSHHostKeyPolicy = if configuredHostKeyPolicy == .openssh,
+                                                    !target.isEmpty,
+                                                    target == configuredTarget
+        {
+            .openssh
+        } else {
+            .strict
+        }
         return RemoteSettings(
             mode: mode,
-            target: self.sanitizedTarget(target),
+            target: target,
             identity: identity,
             projectRoot: projectRoot,
-            cliPath: cliPath)
+            cliPath: cliPath,
+            sshHostKeyPolicy: sshHostKeyPolicy)
     }
 
     static func connectionModeIsRemote(defaults: UserDefaults = .standard) -> Bool {
@@ -510,7 +599,9 @@ enum CommandResolver {
     }
 
     private static func shellQuote(_ text: String) -> String {
-        if text.isEmpty { return "''" }
+        if text.isEmpty {
+            return "''"
+        }
         let escaped = text.replacingOccurrences(of: "'", with: "'\\''")
         return "'\(escaped)'"
     }
@@ -534,8 +625,12 @@ enum CommandResolver {
     }
 
     private static func isValidSSHComponent(_ value: String, allowLeadingDash: Bool = false) -> Bool {
-        if value.isEmpty { return false }
-        if !allowLeadingDash, value.hasPrefix("-") { return false }
+        if value.isEmpty {
+            return false
+        }
+        if !allowLeadingDash, value.hasPrefix("-") {
+            return false
+        }
         let invalid = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
         return value.rangeOfCharacter(from: invalid) == nil
     }

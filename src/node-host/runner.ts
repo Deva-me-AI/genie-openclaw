@@ -1,3 +1,4 @@
+/** CLI runner for node-host stdin/stdout command dispatch. */
 import fs from "node:fs";
 import {
   GATEWAY_CLIENT_MODES,
@@ -28,12 +29,15 @@ import {
 } from "./plugin-node-host.js";
 
 export { buildNodeInvokeResultParams };
+export { buildNodeEventParams } from "./invoke.js";
 
 type NodeHostRunOptions = {
   gatewayHost: string;
   gatewayPort: number;
   gatewayTls?: boolean;
   gatewayTlsFingerprint?: string;
+  /** Optional WebSocket context path (e.g. "/openclaw-gw"). */
+  gatewayContextPath?: string;
   nodeId?: string;
   displayName?: string;
 };
@@ -244,6 +248,7 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
     port: opts.gatewayPort,
     tls: opts.gatewayTls ?? getRuntimeConfig().gateway?.tls?.enabled ?? false,
     tlsFingerprint: opts.gatewayTlsFingerprint,
+    contextPath: opts.gatewayContextPath,
   };
   config.gateway = gateway;
   await saveNodeHostConfig(config);
@@ -259,7 +264,12 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
   const host = gateway.host ?? "127.0.0.1";
   const port = gateway.port ?? 18789;
   const scheme = gateway.tls ? "wss" : "ws";
-  const url = `${scheme}://${host}:${port}`;
+  const contextPath = gateway.contextPath
+    ? gateway.contextPath.startsWith("/")
+      ? gateway.contextPath
+      : `/${gateway.contextPath}`
+    : "";
+  const url = `${scheme}://${host}:${port}${contextPath}`;
   const pathEnv = ensureNodePathEnv();
 
   const client = new GatewayClient({
@@ -299,6 +309,9 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
     onConnectError: (err) => {
       // keep retrying (handled by GatewayClient)
       writeStderrLine(`node host gateway connect failed: ${err.message}`);
+    },
+    onHelloOk: () => {
+      writeStderrLine(`node host gateway connected: ${url}`);
     },
     onReconnectPaused: (info) => {
       handleNodeHostReconnectPaused(info);

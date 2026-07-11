@@ -46,6 +46,7 @@ function createOptions(method: string, params: Record<string, unknown>): TestHan
 describe("channels pairing handlers", () => {
   beforeEach(() => {
     hoisted.listPairingChannels.mockReset();
+    hoisted.listPairingChannels.mockReturnValue(["telegram"]);
     hoisted.notifyPairingApproved.mockReset();
     hoisted.listChannelPairingRequests.mockReset();
     hoisted.approveChannelPairingCode.mockReset();
@@ -111,5 +112,23 @@ describe("channels pairing handlers", () => {
       ts: expect.any(Number),
     });
     expect(opts.respond).toHaveBeenCalledWith(true, { id: "sender-1" }, undefined);
+  });
+
+  it("rejects channels that do not support pairing", async () => {
+    const opts = createOptions("channels.pairing.approve", {
+      channel: "unknown",
+      code: "ABCD2345",
+    });
+
+    await channelsHandlers["channels.pairing.approve"]?.(opts);
+
+    expect(hoisted.approveChannelPairingCode).not.toHaveBeenCalled();
+    expect(hoisted.notifyPairingApproved).not.toHaveBeenCalled();
+    expect(opts.context.broadcast).not.toHaveBeenCalled();
+    expect(opts.respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ message: "unknown pairing channel" }),
+    );
   });
 });

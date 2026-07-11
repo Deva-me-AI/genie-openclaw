@@ -1,3 +1,4 @@
+// Diffs plugin module implements tool behavior.
 import fs from "node:fs/promises";
 import { optionalFiniteNumberSchema, stringEnum } from "openclaw/plugin-sdk/channel-actions";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
@@ -8,7 +9,7 @@ import type { Static } from "typebox";
 import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from "../api.js";
 import { PlaywrightDiffScreenshotter, type DiffScreenshotter } from "./browser.js";
 import { resolveDiffImageRenderOptions } from "./config.js";
-import { renderDiffDocument } from "./render.js";
+import { DiffRenderInputError, renderDiffDocument } from "./render.js";
 import type { DiffArtifactStore } from "./store.js";
 import type {
   DiffArtifactContext,
@@ -36,6 +37,7 @@ const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_TITLE_BYTES = 1_024;
 const MAX_PATH_BYTES = 2_048;
 const MAX_LANG_BYTES = 128;
+const MAX_DIFF_ARTIFACT_TTL_SECONDS = 21_600;
 
 const DiffsToolSchema = Type.Object(
   {
@@ -127,7 +129,7 @@ const DiffsToolSchema = Type.Object(
     ttlSeconds: optionalFiniteNumberSchema({
       description: "Artifact lifetime in seconds. Default: 1800. Maximum: 21600.",
       minimum: 1,
-      maximum: 21_600,
+      maximum: MAX_DIFF_ARTIFACT_TTL_SECONDS,
     }),
     baseUrl: Type.Optional(
       Type.String({
@@ -165,6 +167,20 @@ export function createDiffsTool(params: {
       const rawRecord = rawParams as Record<string, unknown>;
       const artifactContext = buildArtifactContext(params.context);
       const input = normalizeDiffInput(toolParams);
+      if (input.kind === "before_after" && input.before === input.after) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Before and after are identical — no changes to render.",
+            },
+          ],
+          details: {
+            changed: false,
+            ...(artifactContext ? { context: artifactContext } : {}),
+          },
+        };
+      }
       const mode = normalizeMode(toolParams.mode, params.defaults.mode);
       const theme = normalizeTheme(toolParams.theme, params.defaults.theme);
       const layout = normalizeLayout(toolParams.layout, params.defaults.layout);
@@ -202,7 +218,12 @@ export function createDiffsTool(params: {
           languagePackAvailable: params.languagePackAvailable,
         },
         renderTarget,
-      );
+      ).catch((error: unknown) => {
+        if (error instanceof DiffRenderInputError) {
+          throw new PluginToolInputError(error.message);
+        }
+        throw error;
+      });
 
       const screenshotter =
         params.screenshotter ?? new PlaywrightDiffScreenshotter({ config: params.api.config });
@@ -230,6 +251,7 @@ export function createDiffsTool(params: {
           ],
           details: buildArtifactDetails({
             baseDetails: {
+              changed: true,
               ...(artifactFile.artifactId ? { artifactId: artifactFile.artifactId } : {}),
               ...(artifactFile.expiresAt ? { expiresAt: artifactFile.expiresAt } : {}),
               title: rendered.title,
@@ -260,6 +282,7 @@ export function createDiffsTool(params: {
       });
 
       const baseDetails = {
+        changed: true,
         artifactId: artifact.id,
         viewerUrl,
         viewerPath: artifact.viewerPath,
@@ -539,7 +562,7 @@ function normalizeTtlMs(ttlSeconds?: number): number | undefined {
   if (!Number.isFinite(ttlSeconds) || ttlSeconds === undefined) {
     return undefined;
   }
-  return Math.floor(ttlSeconds * 1000);
+  return Math.floor(Math.min(Math.max(ttlSeconds, 1), MAX_DIFF_ARTIFACT_TTL_SECONDS) * 1000);
 }
 
 class PluginToolInputError extends Error {

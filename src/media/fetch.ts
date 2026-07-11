@@ -1,4 +1,15 @@
+// Media fetch helpers download and validate remote media payloads.
+import { MAX_DOCUMENT_BYTES } from "@openclaw/media-core/constants";
+import { parseMediaContentLength } from "@openclaw/media-core/content-length";
+import { basenameFromAnyPath, extnameFromAnyPath } from "@openclaw/media-core/file-name";
+import { detectMime, extensionForMime } from "@openclaw/media-core/mime";
+import { isAbortError } from "../infra/abort-signal.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import {
+  readChunkWithIdleTimeout,
+  readResponseTextSnippet,
+  readResponseWithLimit,
+} from "../infra/http-body.js";
 import {
   fetchWithSsrFGuard,
   withStrictGuardedFetchMode,
@@ -6,31 +17,32 @@ import {
 } from "../infra/net/fetch-guard.js";
 import type { LookupFn, PinnedDispatcherPolicy, SsrFPolicy } from "../infra/net/ssrf.js";
 import { retryAsync, type RetryOptions } from "../infra/retry.js";
-import { isAbortError, isTransientNetworkError } from "../infra/unhandled-rejections.js";
+import { isTransientNetworkError } from "../infra/unhandled-rejections.js";
 import { redactSensitiveText } from "../logging/redact.js";
-import { MAX_DOCUMENT_BYTES } from "./constants.js";
-import { parseMediaContentLength } from "./content-length.js";
-import { basenameFromAnyPath, extnameFromAnyPath } from "./file-name.js";
-import { detectMime, extensionForMime } from "./mime.js";
-import { readResponseTextSnippet, readResponseWithLimit } from "./read-response-with-limit.js";
 import { saveMediaBuffer, saveMediaStream, type SavedMedia } from "./store.js";
 
+/** Default remote media fetch cap shared by buffer reads and store writes. */
 export const DEFAULT_FETCH_MEDIA_MAX_BYTES = MAX_DOCUMENT_BYTES;
 
+/** Remote media bytes plus metadata before they are persisted to the media store. */
 type FetchMediaResult = {
   buffer: Buffer;
   contentType?: string;
   fileName?: string;
 };
 
+/** Saved media record enriched with the best remote filename candidate. */
 export type SavedRemoteMedia = SavedMedia & {
   fileName?: string;
 };
 
+/** Closed error classes callers can use for retry and diagnostic policy. */
 export type MediaFetchErrorCode = "max_bytes" | "http_error" | "fetch_failed";
 
+/** Retry policy applied around the complete guarded fetch and body read/save operation. */
 export type MediaFetchRetryOptions = RetryOptions;
 
+/** Structured fetch error used for retry decisions and caller-facing diagnostics. */
 export class MediaFetchError extends Error {
   readonly code: MediaFetchErrorCode;
   readonly status?: number;
@@ -47,8 +59,10 @@ export class MediaFetchError extends Error {
   }
 }
 
+/** Fetch-compatible injection point used by tests and guarded network callers. */
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+/** Alternate dispatcher/lookup pair tried inside a single guarded fetch attempt. */
 export type FetchDispatcherAttempt = {
   dispatcherPolicy?: PinnedDispatcherPolicy;
   lookupFn?: LookupFn;
@@ -82,6 +96,7 @@ type FetchMediaOptions = {
   trustExplicitProxyDns?: boolean;
 };
 
+/** Options for validating and saving an existing Response body into the media store. */
 export type SaveResponseMediaOptions = {
   sourceUrl?: string;
   filePathHint?: string;
@@ -92,6 +107,7 @@ export type SaveResponseMediaOptions = {
   originalFilename?: string;
 };
 
+/** Options for guarded URL fetches that are saved directly into the media store. */
 export type SaveRemoteMediaOptions = FetchMediaOptions & {
   fallbackContentType?: string;
   subdir?: string;
@@ -182,6 +198,7 @@ async function fetchGuardedMediaResponse(
   } = options;
   const sourceUrl = redactMediaUrl(url);
 
+  // Dispatcher attempts are fallback routes inside one logical guarded fetch operation.
   const attempts =
     dispatcherAttempts && dispatcherAttempts.length > 0
       ? dispatcherAttempts
@@ -367,6 +384,8 @@ function resolveResponseContentType(params: {
   }
   const headerContentType = params.headerContentType?.split(";")[0]?.trim().toLowerCase();
   const fallbackContentType = params.fallbackContentType.split(";")[0]?.trim().toLowerCase();
+  // Some platforms mislabel audio/video container uploads by top-level type.
+  // Preserve the caller hint when only that top-level prefix differs.
   if (
     headerContentType?.startsWith("video/") &&
     fallbackContentType?.startsWith("audio/") &&
@@ -375,42 +394,6 @@ function resolveResponseContentType(params: {
     return params.fallbackContentType;
   }
   return params.headerContentType ?? params.fallbackContentType;
-}
-
-async function readChunkWithIdleTimeout(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  chunkTimeoutMs: number,
-): Promise<Awaited<ReturnType<typeof reader.read>>> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
-  return await new Promise((resolve, reject) => {
-    const clear = () => {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-        timeoutId = undefined;
-      }
-    };
-    timeoutId = setTimeout(() => {
-      timedOut = true;
-      clear();
-      void reader.cancel().catch(() => undefined);
-      reject(new Error(`Media download stalled: no data received for ${chunkTimeoutMs}ms`));
-    }, chunkTimeoutMs);
-    void reader.read().then(
-      (result) => {
-        clear();
-        if (!timedOut) {
-          resolve(result);
-        }
-      },
-      (err) => {
-        clear();
-        if (!timedOut) {
-          reject(err);
-        }
-      },
-    );
-  });
 }
 
 async function* responseBodyChunks(
@@ -548,6 +531,7 @@ async function withMediaFetchRetry<T>(
   });
 }
 
+/** Validates and saves a caller-provided response without performing a new fetch. */
 export async function saveResponseMedia(
   res: Response,
   options: SaveResponseMediaOptions = {},
@@ -574,6 +558,7 @@ export async function saveResponseMedia(
   });
 }
 
+/** Fetches media through SSRF guards and saves the body into the media store. */
 export async function saveRemoteMedia(options: SaveRemoteMediaOptions): Promise<SavedRemoteMedia> {
   return await withMediaFetchRetry(options, () => saveRemoteMediaOnce(options));
 }
@@ -606,6 +591,7 @@ async function saveRemoteMediaOnce(options: SaveRemoteMediaOptions): Promise<Sav
   }
 }
 
+/** Fetches media through SSRF guards and returns the bounded response body as a buffer. */
 export async function readRemoteMediaBuffer(options: FetchMediaOptions): Promise<FetchMediaResult> {
   return await withMediaFetchRetry(options, () => readRemoteMediaBufferOnce(options));
 }
@@ -630,10 +616,10 @@ async function readRemoteMediaBufferOnce(options: FetchMediaOptions): Promise<Fe
     let buffer: Buffer;
     try {
       buffer = await readResponseWithLimit(res, effectiveMaxBytes, {
-        onOverflow: ({ maxBytes, res }) =>
+        onOverflow: ({ maxBytes, res: resLocal }) =>
           new MediaFetchError(
             "max_bytes",
-            `Failed to fetch media from ${redactMediaUrl(res.url || options.url)}: payload exceeds maxBytes ${maxBytes}`,
+            `Failed to fetch media from ${redactMediaUrl(resLocal.url || options.url)}: payload exceeds maxBytes ${maxBytes}`,
           ),
         chunkTimeoutMs: options.readIdleTimeoutMs,
       });

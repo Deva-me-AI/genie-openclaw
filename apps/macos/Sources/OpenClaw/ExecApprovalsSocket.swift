@@ -132,6 +132,25 @@ private struct ExecHostRunResult: Codable {
     var error: String?
 }
 
+enum ExecHostOutputLimiter {
+    static let maxJsonlResponseBytes = 16 * 1024 * 1024
+    static let maxOutputFieldBytes = 1024 * 1024
+    private static let truncationMarker = "... (truncated) "
+
+    static func truncate(_ value: String) -> String {
+        let bytes = value.utf8
+        guard bytes.count > self.maxOutputFieldBytes else { return value }
+
+        let tailBudget = self.maxOutputFieldBytes - self.truncationMarker.utf8.count
+        var start = bytes.index(bytes.endIndex, offsetBy: -tailBudget)
+        while start < bytes.endIndex, (bytes[start] & 0xC0) == 0x80 {
+            start = bytes.index(after: start)
+        }
+        let tail = String(bytes: bytes[start...], encoding: .utf8) ?? ""
+        return self.truncationMarker + tail
+    }
+}
+
 struct ExecHostError: Codable, Error {
     var code: String
     var message: String
@@ -150,9 +169,13 @@ private func readLineFromHandle(_ handle: FileHandle, maxBytes: Int) throws -> S
     var buffer = Data()
     while buffer.count < maxBytes {
         let chunk = try handle.read(upToCount: 4096) ?? Data()
-        if chunk.isEmpty { break }
+        if chunk.isEmpty {
+            break
+        }
         buffer.append(chunk)
-        if buffer.contains(0x0A) { break }
+        if buffer.contains(0x0A) {
+            break
+        }
     }
     guard let newlineIndex = buffer.firstIndex(of: 0x0A) else {
         guard !buffer.isEmpty else { return nil }
@@ -596,7 +619,9 @@ private enum ExecHostExecutor {
         guard needsScreenRecording == true else { return nil }
         let authorized = await PermissionManager
             .status([.screenRecording])[.screenRecording] ?? false
-        if authorized { return nil }
+        if authorized {
+            return nil
+        }
         return self.errorResponse(
             code: "UNAVAILABLE",
             message: "PERMISSION_MISSING: screenRecording",
@@ -621,8 +646,8 @@ private enum ExecHostExecutor {
             exitCode: result.exitCode,
             timedOut: result.timedOut,
             success: result.success,
-            stdout: result.stdout,
-            stderr: result.stderr,
+            stdout: ExecHostOutputLimiter.truncate(result.stdout),
+            stderr: ExecHostOutputLimiter.truncate(result.stderr),
             error: result.errorMessage)
         return self.successResponse(payload)
     }
@@ -709,9 +734,15 @@ enum ExecApprovalsSocketPathGuard {
         }
 
         let fileType = status.st_mode & mode_t(S_IFMT)
-        if fileType == mode_t(S_IFDIR) { return .directory }
-        if fileType == mode_t(S_IFSOCK) { return .socket }
-        if fileType == mode_t(S_IFLNK) { return .symlink }
+        if fileType == mode_t(S_IFDIR) {
+            return .directory
+        }
+        if fileType == mode_t(S_IFSOCK) {
+            return .socket
+        }
+        if fileType == mode_t(S_IFLNK) {
+            return .symlink
+        }
         return .other
     }
 
@@ -825,7 +856,9 @@ private final class ExecApprovalsSocketServer: @unchecked Sendable {
                 }
             }
             if client < 0 {
-                if errno == EINTR { continue }
+                if errno == EINTR {
+                    continue
+                }
                 break
             }
             Task.detached { [weak self] in

@@ -1,8 +1,11 @@
+// CLI backend live probe helpers run cron/MCP/image probes through the gateway
+// CLI backend and poll for externally visible live results.
 import { randomUUID } from "node:crypto";
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { renderCatFacePngBase64 } from "../../test/helpers/live-image-probe.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { parseStrictPositiveInteger } from "../infra/parse-finite-number.js";
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import { sleep } from "../utils/sleep.js";
 import type { GatewayClient } from "./client.js";
 import {
   shouldRetryCliCronMcpProbeReply,
@@ -41,10 +44,6 @@ function logCliCronProbe(step: string, details?: Record<string, unknown>): void 
   }
   const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : "";
   console.error(`[gateway-cli-live:cron] ${step}${suffix}`);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function pollCliCronJobVisible(params: {
@@ -214,7 +213,7 @@ async function callLoopbackJsonRpc(params: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response | undefined;
-  let text = "";
+  let text;
   try {
     response = await fetch(`http://127.0.0.1:${runtime.port}/mcp`, {
       method: "POST",

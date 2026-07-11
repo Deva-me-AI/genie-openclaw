@@ -1,3 +1,4 @@
+// Copilot plugin module implements sdk loader behavior.
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -9,13 +10,11 @@ export function resolveCopilotSdkFallbackDir(env: NodeJS.ProcessEnv = process.en
   return path.join(resolveStateDir(env), "npm-runtime", "copilot");
 }
 
-export const COPILOT_SDK_FALLBACK_DIR = resolveCopilotSdkFallbackDir();
-
-export const COPILOT_SDK_SPEC = "@github/copilot-sdk@1.0.0-beta.4";
+export const COPILOT_SDK_SPEC = "@github/copilot-sdk@1.0.5";
 
 let cached: Promise<typeof Sdk> | undefined;
 
-export interface LoadCopilotSdkOptions {
+interface LoadCopilotSdkOptions {
   readonly fallbackDir?: string;
   readonly primaryImport?: () => Promise<typeof Sdk>;
   readonly fallbackImport?: (absolutePath: string) => Promise<typeof Sdk>;
@@ -30,7 +29,7 @@ export async function loadCopilotSdk(options: LoadCopilotSdkOptions = {}): Promi
 
   const promise = doLoad(options);
   if (useCache) {
-    cached = promise.catch((err) => {
+    cached = promise.catch((err: unknown) => {
       cached = undefined;
       throw err;
     });

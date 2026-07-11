@@ -30,10 +30,14 @@ enum OnboardingStateStore {
         hasSavedGatewayConnection: Bool? = nil)
         -> Bool
     {
-        if defaults.bool(forKey: self.completedDefaultsKey) { return false }
+        if defaults.bool(forKey: self.completedDefaultsKey) {
+            return false
+        }
         let hasSavedGatewayConnection =
-            hasSavedGatewayConnection ?? (GatewaySettingsStore.loadLastGatewayConnection() != nil)
-        if hasSavedGatewayConnection { return false }
+            hasSavedGatewayConnection ?? (GatewaySettingsStore.activeGatewayEntry() != nil)
+        if hasSavedGatewayConnection {
+            return false
+        }
         return appModel.gatewayServerName == nil
     }
 
@@ -51,10 +55,6 @@ enum OnboardingStateStore {
 
     static func markFirstRunIntroSeen(defaults: UserDefaults = .standard) {
         defaults.set(true, forKey: self.firstRunIntroSeenDefaultsKey)
-    }
-
-    static func markIncomplete(defaults: UserDefaults = .standard) {
-        defaults.set(false, forKey: self.completedDefaultsKey)
     }
 
     static func reset(defaults: UserDefaults = .standard) {

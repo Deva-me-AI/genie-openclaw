@@ -1,3 +1,9 @@
+/**
+ * JSON schema for the Browser agent tool.
+ *
+ * The schema stays intentionally flat because provider function-tool validators
+ * reject several nested union shapes that TypeBox can otherwise emit.
+ */
 import {
   optionalFiniteNumberSchema,
   optionalNonNegativeIntegerSchema,
@@ -38,6 +44,8 @@ const BROWSER_TOOL_ACTIONS = [
   "navigate",
   "console",
   "pdf",
+  "download",
+  "waitfordownload",
   "upload",
   "dialog",
   "act",
@@ -51,13 +59,16 @@ const BROWSER_SNAPSHOT_REFS = ["role", "aria"] as const;
 
 const BROWSER_IMAGE_TYPES = ["png", "jpeg"] as const;
 
+const TAB_REFERENCE_DESCRIPTION =
+  "Tab reference. Prefer suggestedTargetId, tabId, or label from tabs output; raw CDP targetId and unique raw prefixes remain supported for compatibility.";
+
 // NOTE: Using a flattened object schema instead of Type.Union([Type.Object(...), ...])
 // because Claude API on Vertex AI rejects nested anyOf schemas as invalid JSON Schema.
 // The discriminator (kind) determines which properties are relevant; runtime validates.
 const BrowserActSchema = Type.Object({
   kind: stringEnum(BROWSER_ACT_KINDS),
   // Common fields
-  targetId: Type.Optional(Type.String()),
+  targetId: Type.Optional(Type.String({ description: TAB_REFERENCE_DESCRIPTION })),
   ref: Type.Optional(Type.String()),
   // click
   doubleClick: Type.Optional(Type.Boolean()),
@@ -96,6 +107,7 @@ const BrowserActSchema = Type.Object({
 // IMPORTANT: OpenAI function tool schemas must have a top-level `type: "object"`.
 // A root-level `Type.Union([...])` compiles to `{ anyOf: [...] }` (no `type`),
 // which OpenAI rejects ("Invalid schema ... type: None"). Keep this schema an object.
+/** Provider-compatible Browser tool argument schema. */
 export const BrowserToolSchema = Type.Object({
   action: stringEnum(BROWSER_TOOL_ACTIONS),
   target: optionalStringEnum(BROWSER_TARGETS),
@@ -103,7 +115,7 @@ export const BrowserToolSchema = Type.Object({
   profile: Type.Optional(Type.String()),
   targetUrl: Type.Optional(Type.String()),
   url: Type.Optional(Type.String()),
-  targetId: Type.Optional(Type.String()),
+  targetId: Type.Optional(Type.String({ description: TAB_REFERENCE_DESCRIPTION })),
   label: Type.Optional(Type.String()),
   limit: optionalPositiveIntegerSchema(),
   maxChars: optionalNonNegativeIntegerSchema(),
@@ -119,6 +131,7 @@ export const BrowserToolSchema = Type.Object({
   urls: Type.Optional(Type.Boolean()),
   fullPage: Type.Optional(Type.Boolean()),
   ref: Type.Optional(Type.String()),
+  path: Type.Optional(Type.String()),
   element: Type.Optional(Type.String()),
   type: optionalStringEnum(BROWSER_IMAGE_TYPES),
   level: Type.Optional(Type.String()),

@@ -97,7 +97,9 @@ final class InstancesStore {
     }
 
     func refresh() async {
-        if self.isLoading { return }
+        if self.isLoading {
+            return
+        }
         self.statusMessage = nil
         self.isLoading = true
         defer { self.isLoading = false }
@@ -169,7 +171,9 @@ final class InstancesStore {
 
     private func snippet(_ data: Data?, limit: Int = 256) -> String {
         guard let data else { return "<none>" }
-        if data.isEmpty { return "<empty>" }
+        if data.isEmpty {
+            return "<empty>"
+        }
         let prefix = data.prefix(limit)
         if let asString = String(data: prefix, encoding: .utf8) {
             return asString.replacingOccurrences(of: "\n", with: " ")
@@ -182,10 +186,14 @@ final class InstancesStore {
             let data = try await ControlChannel.shared.health(timeout: 8)
             guard let snap = decodeHealthSnapshot(from: data) else { return }
             let linkId = snap.channelOrder?.first(where: {
-                if let summary = snap.channels[$0] { return summary.linked != nil }
+                if let summary = snap.channels[$0] {
+                    return summary.linked != nil
+                }
                 return false
             }) ?? snap.channels.keys.first(where: {
-                if let summary = snap.channels[$0] { return summary.linked != nil }
+                if let summary = snap.channels[$0] {
+                    return summary.linked != nil
+                }
                 return false
             })
             let linked = linkId.flatMap { snap.channels[$0]?.linked } ?? false
@@ -218,16 +226,6 @@ final class InstancesStore {
                 self.statusMessage =
                     "Presence unavailable (\(reason)), health probe failed: \(error.localizedDescription)"
             }
-        }
-    }
-
-    private func decodeAndApplyPresenceData(_ data: Data) {
-        do {
-            let decoded = try JSONDecoder().decode([PresenceEntry].self, from: data)
-            self.applyPresence(decoded)
-        } catch {
-            self.logger.error("presence decode from event failed: \(error.localizedDescription, privacy: .public)")
-            self.lastError = error.localizedDescription
         }
     }
 
@@ -273,13 +271,19 @@ final class InstancesStore {
         for inst in instances {
             guard let reason = inst.reason?.trimmingCharacters(in: .whitespacesAndNewlines) else { continue }
             guard reason == "node-connected" else { continue }
-            if let mode = inst.mode?.lowercased(), mode == "local" { continue }
+            if let mode = inst.mode?.lowercased(), mode == "local" {
+                continue
+            }
 
             let previous = self.lastPresenceById[inst.id]
-            if previous?.reason == "node-connected", previous?.ts == inst.ts { continue }
+            if previous?.reason == "node-connected", previous?.ts == inst.ts {
+                continue
+            }
 
             let lastNotified = self.lastLoginNotifiedAtMs[inst.id] ?? 0
-            if inst.ts <= lastNotified { continue }
+            if inst.ts <= lastNotified {
+                continue
+            }
             self.lastLoginNotifiedAtMs[inst.id] = inst.ts
 
             let name = inst.host?.trimmingCharacters(in: .whitespacesAndNewlines)

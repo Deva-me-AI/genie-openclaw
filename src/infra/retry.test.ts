@@ -1,5 +1,7 @@
+// Tests retry backoff timing and cancellation behavior.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_SAFE_TIMEOUT_DELAY_MS } from "../utils/timer-delay.js";
+import { MAX_TIMER_TIMEOUT_MS } from "../shared/number-coercion.js";
+import { getRetryAttemptErrors } from "./retry-attempt-errors.js";
 import { resolveRetryConfig, retryAsync } from "./retry.js";
 
 const randomMocks = vi.hoisted(() => ({
@@ -70,7 +72,7 @@ async function runRetryNumberCase(
     const promise = retryAsync(fn as () => Promise<unknown>, attempts, initialDelayMs);
     const settled = promise.then(
       (value) => ({ ok: true as const, value }),
-      (error) => ({ ok: false as const, error }),
+      (error: unknown) => ({ ok: false as const, error }),
     );
     await vi.runAllTimersAsync();
     const result = await settled;
@@ -143,6 +145,21 @@ describe("retryAsync", () => {
     expect(shouldRetry).toHaveBeenCalledWith(err, 1);
   });
 
+  it("retains every failed attempt without replacing the terminal error", async () => {
+    const firstError = new Error("first");
+    const terminalError = new Error("terminal");
+    const fn = vi.fn().mockRejectedValueOnce(firstError).mockRejectedValueOnce(terminalError);
+
+    const failure = await retryAsync(fn, {
+      attempts: 2,
+      minDelayMs: 0,
+      maxDelayMs: 0,
+    }).catch((err: unknown) => err);
+
+    expect(failure).toBe(terminalError);
+    expect(getRetryAttemptErrors(failure)).toEqual([firstError, terminalError]);
+  });
+
   it("calls onRetry with retry metadata before retrying", async () => {
     const err = new Error("boom");
     const fn = vi.fn().mockRejectedValueOnce(err).mockResolvedValueOnce("ok");
@@ -207,9 +224,9 @@ describe("retryAsync", () => {
     const fn = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce("ok");
     try {
       const promise = retryAsync(fn, 2, 3_000_000_000);
-      await vi.advanceTimersByTimeAsync(MAX_SAFE_TIMEOUT_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(MAX_TIMER_TIMEOUT_MS);
       await expect(promise).resolves.toBe("ok");
-      expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_SAFE_TIMEOUT_DELAY_MS);
+      expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
     } finally {
       timeoutSpy.mockRestore();
       vi.clearAllTimers();
@@ -228,19 +245,11 @@ describe("retryAsync", () => {
       .mockResolvedValueOnce("ok");
     try {
       const promise = retryAsync(fn, 3, Number.MAX_VALUE);
-      await vi.advanceTimersByTimeAsync(MAX_SAFE_TIMEOUT_DELAY_MS);
-      await vi.advanceTimersByTimeAsync(MAX_SAFE_TIMEOUT_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(MAX_TIMER_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(MAX_TIMER_TIMEOUT_MS);
       await expect(promise).resolves.toBe("ok");
-      expect(timeoutSpy).toHaveBeenNthCalledWith(
-        1,
-        expect.any(Function),
-        MAX_SAFE_TIMEOUT_DELAY_MS,
-      );
-      expect(timeoutSpy).toHaveBeenNthCalledWith(
-        2,
-        expect.any(Function),
-        MAX_SAFE_TIMEOUT_DELAY_MS,
-      );
+      expect(timeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), MAX_TIMER_TIMEOUT_MS);
+      expect(timeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), MAX_TIMER_TIMEOUT_MS);
     } finally {
       timeoutSpy.mockRestore();
       vi.clearAllTimers();
@@ -324,8 +333,8 @@ describe("resolveRetryConfig", () => {
       },
       expected: {
         attempts: 3,
-        minDelayMs: MAX_SAFE_TIMEOUT_DELAY_MS,
-        maxDelayMs: MAX_SAFE_TIMEOUT_DELAY_MS,
+        minDelayMs: MAX_TIMER_TIMEOUT_MS,
+        maxDelayMs: MAX_TIMER_TIMEOUT_MS,
         jitter: 0,
       },
     },

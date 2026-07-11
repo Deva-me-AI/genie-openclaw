@@ -1,7 +1,12 @@
+import { supportsOpenAIReasoningEffort } from "@openclaw/ai/internal/openai";
+/**
+ * OpenAI Responses payload policy.
+ * Classifies endpoint capabilities and applies store, prompt-cache,
+ * server-compaction, service-tier, and reasoning payload rules.
+ */
+import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import { parseStrictPositiveInteger } from "../infra/parse-finite-number.js";
-import { readStringValue } from "../shared/string-coerce.js";
 import { asBoolean } from "../utils/boolean.js";
-import { supportsOpenAIReasoningEffort } from "./openai-reasoning-effort.js";
 
 type OpenAIResponsesPayloadModel = {
   api?: unknown;
@@ -31,7 +36,7 @@ type OpenAIResponsesEndpointClass =
   | "moonshot-native"
   | "modelstudio-native"
   | "openai-public"
-  | "openai-codex"
+  | "openai"
   | "opencode-native"
   | "azure-openai"
   | "openrouter"
@@ -48,6 +53,7 @@ type OpenAIResponsesPayloadPolicy = {
   compactThreshold: number;
   explicitStore: boolean | undefined;
   shouldStripDisabledReasoningPayload: boolean;
+  shouldStripInputStatus: boolean;
   shouldStripPromptCache: boolean;
   shouldStripStore: boolean;
   useServerCompaction: boolean;
@@ -64,7 +70,7 @@ type OpenAIResponsesPayloadCapabilities = {
 const OPENAI_RESPONSES_APIS = new Set([
   "openai-responses",
   "azure-openai-responses",
-  "openai-codex-responses",
+  "openai-chatgpt-responses",
   "openclaw-openai-responses-transport",
 ]);
 const OPENAI_RESPONSES_PROVIDERS = new Set(["openai", "azure-openai", "azure-openai-responses"]);
@@ -166,7 +172,7 @@ function resolveBundledOpenAIResponsesEndpointClass(
     case "api.openai.com":
       return "openai-public";
     case "chatgpt.com":
-      return "openai-codex";
+      return "openai";
     case "generativelanguage.googleapis.com":
       return "google-generative-ai";
     case "aiplatform.googleapis.com":
@@ -223,12 +229,13 @@ function resolveOpenAIResponsesPayloadCapabilities(
 ): OpenAIResponsesPayloadCapabilities {
   const provider = normalizeLowercaseString(model.provider);
   const api = normalizeLowercaseString(model.api);
+  const isOpenAIProvider = provider === "openai";
   const endpointClass = resolveBundledOpenAIResponsesEndpointClass(model.baseUrl);
   const isResponsesApi = isOpenAIResponsesApi(api);
   const usesConfiguredBaseUrl = endpointClass !== "default";
   const usesKnownNativeOpenAIEndpoint =
     endpointClass === "openai-public" ||
-    endpointClass === "openai-codex" ||
+    endpointClass === "openai" ||
     endpointClass === "azure-openai";
   const usesKnownNativeOpenAIRoute =
     endpointClass === "default" ? provider === "openai" : usesKnownNativeOpenAIEndpoint;
@@ -248,13 +255,14 @@ function resolveOpenAIResponsesPayloadCapabilities(
       (provider === "openai" &&
         (api === "openai-responses" || api === "openclaw-openai-responses-transport") &&
         endpointClass === "openai-public") ||
-      (provider === "openai-codex" &&
-        (api === "openai-codex-responses" ||
+      (isOpenAIProvider &&
+        (api === "openai-chatgpt-responses" ||
           api === "openai-responses" ||
           api === "openclaw-openai-responses-transport") &&
-        endpointClass === "openai-codex"),
+        endpointClass === "openai"),
     allowsResponsesStore:
       supportsResponsesStoreField &&
+      api !== "openai-chatgpt-responses" &&
       provider !== undefined &&
       OPENAI_RESPONSES_PROVIDERS.has(provider) &&
       usesKnownNativeOpenAIEndpoint,
@@ -318,6 +326,20 @@ function stripDisabledOpenAIReasoningPayload(payloadObj: Record<string, unknown>
   }
 }
 
+/** Strip returned-item metadata rejected by strict Responses-compatible endpoints. */
+function stripInputItemStatuses(input: unknown): void {
+  if (!Array.isArray(input)) {
+    return;
+  }
+  for (const item of input) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      // Only item-level status is provider metadata. Nested values may be user or tool payloads.
+      delete (item as Record<string, unknown>).status;
+    }
+  }
+}
+
+/** Resolve payload mutation policy for one OpenAI Responses-style model endpoint. */
 export function resolveOpenAIResponsesPayloadPolicy(
   model: OpenAIResponsesPayloadModel,
   options: OpenAIResponsesPayloadPolicyOptions = {},
@@ -338,6 +360,9 @@ export function resolveOpenAIResponsesPayloadPolicy(
   const shouldStripDisabledReasoningPayload =
     isResponsesApi &&
     (!capabilities.usesKnownNativeOpenAIRoute || !supportsOpenAIReasoningEffort(model, "none"));
+  // Strict OpenAI-compatible Responses endpoints reject output-only fields
+  // such as `status` on replayed input items. Strip them for non-native routes.
+  const shouldStripInputStatus = isResponsesApi && !capabilities.usesKnownNativeOpenAIRoute;
 
   return {
     allowsServiceTier: capabilities.allowsOpenAIServiceTier,
@@ -346,6 +371,7 @@ export function resolveOpenAIResponsesPayloadPolicy(
       resolveOpenAIResponsesCompactThreshold(model),
     explicitStore,
     shouldStripDisabledReasoningPayload,
+    shouldStripInputStatus,
     shouldStripPromptCache:
       options.enablePromptCacheStripping === true && capabilities.shouldStripResponsesPromptCache,
     shouldStripStore:
@@ -362,6 +388,7 @@ export function resolveOpenAIResponsesPayloadPolicy(
   };
 }
 
+/** Mutate a Responses request payload according to the resolved endpoint policy. */
 export function applyOpenAIResponsesPayloadPolicy(
   payloadObj: Record<string, unknown>,
   policy: OpenAIResponsesPayloadPolicy,
@@ -386,5 +413,8 @@ export function applyOpenAIResponsesPayloadPolicy(
   }
   if (policy.shouldStripDisabledReasoningPayload) {
     stripDisabledOpenAIReasoningPayload(payloadObj);
+  }
+  if (policy.shouldStripInputStatus) {
+    stripInputItemStatuses(payloadObj.input);
   }
 }

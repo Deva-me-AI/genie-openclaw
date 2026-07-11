@@ -7,10 +7,10 @@ import WebKit
 @Observable
 final class ScreenController {
     private weak var activeWebView: WKWebView?
-    private var trustedRemoteA2UIURL: URL?
 
     var urlString: String = ""
     var errorText: String?
+    var isCanvasPresented: Bool = false
 
     /// Callback invoked when an openclaw:// deep link is tapped in the canvas
     var onDeepLink: ((URL) -> Void)?
@@ -27,11 +27,10 @@ final class ScreenController {
         self.reload()
     }
 
-    func navigate(to urlString: String, trustA2UIActions: Bool = false) {
+    func navigate(to urlString: String, trustA2UIActions _: Bool = false) {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             self.urlString = ""
-            self.trustedRemoteA2UIURL = nil
             self.reload()
             return
         }
@@ -45,7 +44,6 @@ final class ScreenController {
             return
         }
         self.urlString = (trimmed == "/" ? "" : trimmed)
-        self.trustedRemoteA2UIURL = trustA2UIActions ? Self.normalizeTrustedRemoteA2UIURL(from: trimmed) : nil
         self.reload()
     }
 
@@ -75,8 +73,40 @@ final class ScreenController {
 
     func showDefaultCanvas() {
         self.urlString = ""
-        self.trustedRemoteA2UIURL = nil
         self.reload()
+    }
+
+    func presentDefaultCanvas() {
+        self.isCanvasPresented = true
+        self.showDefaultCanvas()
+    }
+
+    func present(urlString: String) {
+        self.isCanvasPresented = true
+        self.navigate(to: urlString)
+    }
+
+    func hideCanvas() {
+        self.isCanvasPresented = false
+        self.showDefaultCanvas()
+    }
+
+    func showLocalA2UI() {
+        self.isCanvasPresented = true
+        guard let url = Self.localA2UIURL else {
+            self.showDefaultCanvas()
+            return
+        }
+        self.urlString = url.absoluteString
+        self.reload()
+    }
+
+    func isShowingLocalA2UI() -> Bool {
+        guard let url = URL(string: self.urlString),
+              url.isFileURL,
+              let expected = Self.localA2UIURL
+        else { return false }
+        return url.standardizedFileURL == expected.standardizedFileURL
     }
 
     func setDebugStatusEnabled(_ enabled: Bool) {
@@ -133,7 +163,9 @@ final class ScreenController {
                 })()
                 """)
                 let trimmed = res.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                if trimmed == "true" || trimmed == "1" { return true }
+                if trimmed == "true" || trimmed == "1" {
+                    return true
+                }
             } catch {
                 // ignore; page likely still loading
             }
@@ -149,16 +181,6 @@ final class ScreenController {
             ])
         }
         return try await WebViewJavaScriptSupport.evaluateToString(webView: webView, javaScript: javaScript)
-    }
-
-    func snapshotPNGBase64(maxWidth: CGFloat? = nil) async throws -> String {
-        let image = try await self.snapshotImage(maxWidth: maxWidth)
-        guard let data = image.pngData() else {
-            throw NSError(domain: "Screen", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "snapshot encode failed",
-            ])
-        }
-        return data.base64EncodedString()
     }
 
     func snapshotBase64(
@@ -239,6 +261,11 @@ final class ScreenController {
         ext: "html",
         subdirectory: "CanvasScaffold")
 
+    private static let localA2UIURL: URL? = ScreenController.bundledResourceURL(
+        name: "index",
+        ext: "html",
+        subdirectory: "CanvasA2UI")
+
     func isTrustedCanvasUIURL(_ url: URL) -> Bool {
         if url.isFileURL {
             let std = url.standardizedFileURL
@@ -247,14 +274,20 @@ final class ScreenController {
             {
                 return true
             }
+            if let expected = Self.localA2UIURL,
+               std == expected.standardizedFileURL
+            {
+                return true
+            }
             return false
         }
-        guard let trusted = self.trustedRemoteA2UIURL else { return false }
-        return Self.normalizeTrustedRemoteA2UIURL(from: url) == trusted
+        return false
     }
 
     nonisolated static func parseA2UIActionBody(_ body: Any) -> [String: Any]? {
-        if let dict = body as? [String: Any] { return dict.isEmpty ? nil : dict }
+        if let dict = body as? [String: Any] {
+            return dict.isEmpty ? nil : dict
+        }
         if let str = body as? String,
            let data = str.data(using: .utf8),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -280,32 +313,16 @@ final class ScreenController {
         scrollView.isScrollEnabled = allowScroll
         scrollView.bounces = allowScroll
     }
-
-    private static func normalizeTrustedRemoteA2UIURL(from raw: String) -> URL? {
-        guard let url = URL(string: raw) else { return nil }
-        return self.normalizeTrustedRemoteA2UIURL(from: url)
-    }
-
-    private static func normalizeTrustedRemoteA2UIURL(from url: URL) -> URL? {
-        guard !url.isFileURL else { return nil }
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
-            return nil
-        }
-        guard let host = url.host?.trimmingCharacters(in: .whitespacesAndNewlines), !host.isEmpty else {
-            return nil
-        }
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.scheme = scheme
-        components?.host = host.lowercased()
-        components?.fragment = nil
-        return components?.url
-    }
 }
 
 extension Double {
     fileprivate func clamped(to range: ClosedRange<Double>) -> Double {
-        if self < range.lowerBound { return range.lowerBound }
-        if self > range.upperBound { return range.upperBound }
+        if self < range.lowerBound {
+            return range.lowerBound
+        }
+        if self > range.upperBound {
+            return range.upperBound
+        }
         return self
     }
 }

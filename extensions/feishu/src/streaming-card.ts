@@ -3,9 +3,16 @@
  */
 
 import type { Client } from "@larksuiteoapi/node-sdk";
-import { resolveExpiresAtMsFromDurationSeconds } from "openclaw/plugin-sdk/number-runtime";
-import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
+import {
+  asDateTimestampMs,
+  resolveDateTimestampMs,
+  resolveExpiresAtMsFromDurationSeconds,
+} from "openclaw/plugin-sdk/number-runtime";
+import { fetchWithSsrFGuard, type LookupFn } from "openclaw/plugin-sdk/ssrf-runtime";
+import { sliceUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { getFeishuUserAgent } from "./client.js";
+import { requestFeishuApi } from "./comment-shared.js";
+import { readFeishuJsonResponse } from "./json-response.js";
 import { resolveFeishuCardTemplate, type CardHeaderConfig } from "./send.js";
 import type { FeishuDomain } from "./types.js";
 
@@ -17,6 +24,15 @@ type CardState = {
   currentText: string;
   sentText: string;
   hasNote: boolean;
+};
+
+export type FeishuStreamingFetch = typeof fetch;
+
+type FeishuStreamingDeps = {
+  /** Override fetch for tests while preserving the real SSRF guard path. */
+  fetchImpl?: FeishuStreamingFetch;
+  /** Override hostname lookup for hermetic SSRF-guard tests. */
+  lookupFn?: LookupFn;
 };
 
 /** Options for customising the initial streaming card appearance. */
@@ -48,13 +64,17 @@ const FEISHU_STREAMING_TOKEN_DEFAULT_LIFETIME_SECONDS = 7200;
 // Token cache (keyed by domain + appId)
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-function resolveStreamingTokenExpiresAt(value: unknown): number {
+function resolveStreamingTokenExpiresAt(value: unknown, nowMs = Date.now()): number {
+  const now = resolveDateTimestampMs(nowMs);
   if (typeof value === "number" && Number.isFinite(value) && value <= 0) {
-    return Date.now();
+    return now;
   }
   return (
-    resolveExpiresAtMsFromDurationSeconds(value) ??
-    Date.now() + FEISHU_STREAMING_TOKEN_DEFAULT_LIFETIME_SECONDS * 1000
+    resolveExpiresAtMsFromDurationSeconds(value, { nowMs: now }) ??
+    resolveExpiresAtMsFromDurationSeconds(FEISHU_STREAMING_TOKEN_DEFAULT_LIFETIME_SECONDS, {
+      nowMs: now,
+    }) ??
+    now
   );
 }
 
@@ -82,10 +102,14 @@ function resolveAllowedHostnames(domain?: FeishuDomain): string[] {
   return ["open.feishu.cn"];
 }
 
-async function getToken(creds: Credentials): Promise<string> {
+async function getToken(creds: Credentials, deps?: FeishuStreamingDeps): Promise<string> {
   const key = `${creds.domain ?? "feishu"}|${creds.appId}`;
   const cached = tokenCache.get(key);
-  if (cached && cached.expiresAt > Date.now() + 60000) {
+  const rawNow = Date.now();
+  const hasValidClock = asDateTimestampMs(rawNow) !== undefined;
+  const now = resolveDateTimestampMs(rawNow);
+  const minUsableExpiresAt = resolveExpiresAtMsFromDurationSeconds(60, { nowMs: now }) ?? now;
+  if (cached && hasValidClock && cached.expiresAt > minUsableExpiresAt) {
     return cached.token;
   }
 
@@ -96,26 +120,31 @@ async function getToken(creds: Credentials): Promise<string> {
       headers: { "Content-Type": "application/json", "User-Agent": getFeishuUserAgent() },
       body: JSON.stringify({ app_id: creds.appId, app_secret: creds.appSecret }),
     },
+    fetchImpl: deps?.fetchImpl,
+    lookupFn: deps?.lookupFn,
     policy: { allowedHostnames: resolveAllowedHostnames(creds.domain) },
     auditContext: "feishu.streaming-card.token",
   });
-  if (!response.ok) {
-    await release();
-    throw new Error(`Token request failed with HTTP ${response.status}`);
-  }
-  const data = (await response.json()) as {
+  let data: {
     code: number;
     msg: string;
     tenant_access_token?: string;
     expire?: number;
   };
-  await release();
+  try {
+    if (!response.ok) {
+      throw new Error(`Token request failed with HTTP ${response.status}`);
+    }
+    data = await readFeishuJsonResponse(response, "feishu.streaming-card.token");
+  } finally {
+    await release();
+  }
   if (data.code !== 0 || !data.tenant_access_token) {
     throw new Error(`Token error: ${data.msg}`);
   }
   tokenCache.set(key, {
     token: data.tenant_access_token,
-    expiresAt: resolveStreamingTokenExpiresAt(data.expire),
+    expiresAt: resolveStreamingTokenExpiresAt(data.expire, now),
   });
   return data.tenant_access_token;
 }
@@ -125,7 +154,10 @@ function truncateSummary(text: string, max = 50): string {
     return "";
   }
   const clean = text.replace(/\n/g, " ").trim();
-  return clean.length <= max ? clean : clean.slice(0, max - 3) + "...";
+  // Slice on a code-point boundary so a surrogate pair (emoji / astral char)
+  // straddling the limit is dropped whole, instead of leaving a lone surrogate
+  // half that Feishu renders as the replacement char.
+  return clean.length <= max ? clean : sliceUtf16Safe(clean, 0, max - 3) + "...";
 }
 
 function hasNaturalStreamingBoundary(text: string): boolean {
@@ -140,16 +172,6 @@ function shouldPushStreamingUpdate(previousText: string, nextText: string): bool
     return true;
   }
   return nextText.length - previousText.length >= STREAMING_SIGNIFICANT_DELTA_CHARS;
-}
-
-function resolveStreamingCardAppendContent(previousText: string, nextText: string): string {
-  if (!nextText || nextText === previousText) {
-    return "";
-  }
-  if (!previousText) {
-    return nextText;
-  }
-  return nextText.startsWith(previousText) ? nextText.slice(previousText.length) : nextText;
 }
 
 export function mergeStreamingText(
@@ -210,11 +232,20 @@ export class FeishuStreamingSession {
   private pendingText: string | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private updateThrottleMs = STREAMING_UPDATE_THROTTLE_MS;
+  private fetchImpl?: FeishuStreamingFetch;
+  private lookupFn?: LookupFn;
 
-  constructor(client: Client, creds: Credentials, log?: (msg: string) => void) {
+  constructor(
+    client: Client,
+    creds: Credentials,
+    log?: (msg: string) => void,
+    deps?: FeishuStreamingDeps,
+  ) {
     this.client = client;
     this.creds = creds;
     this.log = log;
+    this.fetchImpl = deps?.fetchImpl;
+    this.lookupFn = deps?.lookupFn;
   }
 
   async start(
@@ -260,25 +291,33 @@ export class FeishuStreamingSession {
       init: {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${await getToken(this.creds)}`,
+          Authorization: `Bearer ${await getToken(this.creds, {
+            fetchImpl: this.fetchImpl,
+            lookupFn: this.lookupFn,
+          })}`,
           "Content-Type": "application/json",
           "User-Agent": getFeishuUserAgent(),
         },
         body: JSON.stringify({ type: "card_json", data: JSON.stringify(cardJson) }),
       },
+      fetchImpl: this.fetchImpl,
+      lookupFn: this.lookupFn,
       policy: { allowedHostnames: resolveAllowedHostnames(this.creds.domain) },
       auditContext: "feishu.streaming-card.create",
     });
-    if (!createRes.ok) {
-      await releaseCreate();
-      throw new Error(`Create card request failed with HTTP ${createRes.status}`);
-    }
-    const createData = (await createRes.json()) as {
+    let createData: {
       code: number;
       msg: string;
       data?: { card_id: string };
     };
-    await releaseCreate();
+    try {
+      if (!createRes.ok) {
+        throw new Error(`Create card request failed with HTTP ${createRes.status}`);
+      }
+      createData = await readFeishuJsonResponse(createRes, "feishu.streaming-card.create");
+    } finally {
+      await releaseCreate();
+    }
     if (createData.code !== 0 || !createData.data?.card_id) {
       throw new Error(`Create card failed: ${createData.msg}`);
     }
@@ -293,32 +332,44 @@ export class FeishuStreamingSession {
     const sendOptions = options ?? {};
     const sendMode = resolveStreamingCardSendMode(sendOptions);
     if (sendMode === "reply") {
-      sendRes = await this.client.im.message.reply({
-        path: { message_id: sendOptions.replyToMessageId! },
-        data: {
-          msg_type: "interactive",
-          content: cardContent,
-          ...(sendOptions.replyInThread ? { reply_in_thread: true } : {}),
-        },
-      });
+      sendRes = await requestFeishuApi(
+        () =>
+          this.client.im.message.reply({
+            path: { message_id: sendOptions.replyToMessageId! },
+            data: {
+              msg_type: "interactive",
+              content: cardContent,
+              ...(sendOptions.replyInThread ? { reply_in_thread: true } : {}),
+            },
+          }),
+        "Send card failed",
+      );
     } else if (sendMode === "root_create") {
       // root_id is undeclared in the SDK types but accepted at runtime
-      sendRes = await this.client.im.message.create({
-        params: { receive_id_type: receiveIdType },
-        data: Object.assign(
-          { receive_id: receiveId, msg_type: "interactive", content: cardContent },
-          { root_id: sendOptions.rootId },
-        ),
-      });
+      sendRes = await requestFeishuApi(
+        () =>
+          this.client.im.message.create({
+            params: { receive_id_type: receiveIdType },
+            data: Object.assign(
+              { receive_id: receiveId, msg_type: "interactive", content: cardContent },
+              { root_id: sendOptions.rootId },
+            ),
+          }),
+        "Send card failed",
+      );
     } else {
-      sendRes = await this.client.im.message.create({
-        params: { receive_id_type: receiveIdType },
-        data: {
-          receive_id: receiveId,
-          msg_type: "interactive",
-          content: cardContent,
-        },
-      });
+      sendRes = await requestFeishuApi(
+        () =>
+          this.client.im.message.create({
+            params: { receive_id_type: receiveIdType },
+            data: {
+              receive_id: receiveId,
+              msg_type: "interactive",
+              content: cardContent,
+            },
+          }),
+        "Send card failed",
+      );
     }
     if (sendRes.code !== 0 || !sendRes.data?.message_id) {
       throw new Error(`Send card failed: ${sendRes.msg}`);
@@ -330,7 +381,7 @@ export class FeishuStreamingSession {
       sequence: 1,
       currentText: "",
       sentText: "",
-      hasNote: !!options?.note,
+      hasNote: Boolean(options?.note),
     };
     this.log?.(`Started streaming: cardId=${cardId}, messageId=${sendRes.data.message_id}`);
   }
@@ -350,7 +401,10 @@ export class FeishuStreamingSession {
         init: {
           method: "PUT",
           headers: {
-            Authorization: `Bearer ${await getToken(this.creds)}`,
+            Authorization: `Bearer ${await getToken(this.creds, {
+              fetchImpl: this.fetchImpl,
+              lookupFn: this.lookupFn,
+            })}`,
             "Content-Type": "application/json",
             "User-Agent": getFeishuUserAgent(),
           },
@@ -360,6 +414,8 @@ export class FeishuStreamingSession {
             uuid: `s_${this.state.cardId}_${this.state.sequence}`,
           }),
         },
+        fetchImpl: this.fetchImpl,
+        lookupFn: this.lookupFn,
         policy: { allowedHostnames: resolveAllowedHostnames(this.creds.domain) },
         auditContext: "feishu.streaming-card.update",
       });
@@ -390,7 +446,10 @@ export class FeishuStreamingSession {
         init: {
           method: "PUT",
           headers: {
-            Authorization: `Bearer ${await getToken(this.creds)}`,
+            Authorization: `Bearer ${await getToken(this.creds, {
+              fetchImpl: this.fetchImpl,
+              lookupFn: this.lookupFn,
+            })}`,
             "Content-Type": "application/json",
             "User-Agent": getFeishuUserAgent(),
           },
@@ -400,6 +459,8 @@ export class FeishuStreamingSession {
             uuid: `r_${this.state.cardId}_${this.state.sequence}`,
           }),
         },
+        fetchImpl: this.fetchImpl,
+        lookupFn: this.lookupFn,
         policy: { allowedHostnames: resolveAllowedHostnames(this.creds.domain) },
         auditContext: "feishu.streaming-card.replace",
       });
@@ -433,7 +494,9 @@ export class FeishuStreamingSession {
       if (!pending || this.closed) {
         return;
       }
-      void this.update(pending);
+      void this.update(pending).catch((error: unknown) =>
+        this.log?.(`Scheduled flush update failed: ${String(error)}`),
+      );
     }, delayMs);
   }
 
@@ -465,13 +528,12 @@ export class FeishuStreamingSession {
       if (!mergedText || mergedText === this.state.currentText) {
         return;
       }
-      const appendContent = resolveStreamingCardAppendContent(this.state.sentText, mergedText);
-      if (!appendContent) {
+      if (mergedText === this.state.sentText) {
         return;
       }
       this.pendingText = null;
       this.state.currentText = mergedText;
-      const sent = await this.updateCardContent(appendContent, (e) =>
+      const sent = await this.updateCardContent(mergedText, (e) =>
         this.log?.(`Update failed: ${String(e)}`),
       );
       if (sent && this.state) {
@@ -492,7 +554,10 @@ export class FeishuStreamingSession {
       init: {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${await getToken(this.creds)}`,
+          Authorization: `Bearer ${await getToken(this.creds, {
+            fetchImpl: this.fetchImpl,
+            lookupFn: this.lookupFn,
+          })}`,
           "Content-Type": "application/json",
           "User-Agent": getFeishuUserAgent(),
         },
@@ -502,18 +567,20 @@ export class FeishuStreamingSession {
           uuid: `n_${this.state.cardId}_${this.state.sequence}`,
         }),
       },
+      fetchImpl: this.fetchImpl,
+      lookupFn: this.lookupFn,
       policy: { allowedHostnames: resolveAllowedHostnames(this.creds.domain) },
       auditContext: "feishu.streaming-card.note-update",
     })
       .then(async ({ release }) => {
         await release();
       })
-      .catch((e) => this.log?.(`Note update failed: ${String(e)}`));
+      .catch((e: unknown) => this.log?.(`Note update failed: ${String(e)}`));
   }
 
-  async close(finalText?: string, options?: { note?: string }): Promise<void> {
+  async close(finalText?: string, options?: { note?: string }): Promise<boolean> {
     if (!this.state || this.closed) {
-      return;
+      return false;
     }
     this.closed = true;
     this.clearFlushTimer();
@@ -522,20 +589,20 @@ export class FeishuStreamingSession {
     const pendingMerged = mergeStreamingText(this.state.currentText, this.pendingText ?? undefined);
     const text = finalText ?? pendingMerged;
     const apiBase = resolveApiBase(this.creds.domain);
+    let visibleContentSent = Boolean(this.state.sentText.trim());
 
-    // Only send final update if content differs from what's already displayed
-    if (text && text !== this.state.sentText) {
+    // Only send final update if content differs from what's already displayed.
+    // An explicit empty final text clears a transient preview before closeout.
+    if ((text || finalText !== undefined) && text !== this.state.sentText) {
       const sent = text.startsWith(this.state.sentText)
-        ? await this.updateCardContent(
-            resolveStreamingCardAppendContent(this.state.sentText, text),
-            (e) => this.log?.(`Final update failed: ${String(e)}`),
-          )
+        ? await this.updateCardContent(text, (e) => this.log?.(`Final update failed: ${String(e)}`))
         : await this.replaceCardContent(text, (e) =>
             this.log?.(`Final replace failed: ${String(e)}`),
           );
       this.state.currentText = text;
       if (sent) {
         this.state.sentText = text;
+        visibleContentSent = Boolean(text.trim());
       }
     }
 
@@ -551,7 +618,10 @@ export class FeishuStreamingSession {
       init: {
         method: "PATCH",
         headers: {
-          Authorization: `Bearer ${await getToken(this.creds)}`,
+          Authorization: `Bearer ${await getToken(this.creds, {
+            fetchImpl: this.fetchImpl,
+            lookupFn: this.lookupFn,
+          })}`,
           "Content-Type": "application/json; charset=utf-8",
           "User-Agent": getFeishuUserAgent(),
         },
@@ -563,18 +633,47 @@ export class FeishuStreamingSession {
           uuid: `c_${this.state.cardId}_${this.state.sequence}`,
         }),
       },
+      fetchImpl: this.fetchImpl,
+      lookupFn: this.lookupFn,
       policy: { allowedHostnames: resolveAllowedHostnames(this.creds.domain) },
       auditContext: "feishu.streaming-card.close",
     })
       .then(async ({ release }) => {
         await release();
       })
-      .catch((e) => this.log?.(`Close failed: ${String(e)}`));
+      .catch((e: unknown) => this.log?.(`Close failed: ${String(e)}`));
     const finalState = this.state;
     this.state = null;
     this.pendingText = null;
 
     this.log?.(`Closed streaming: cardId=${finalState.cardId}`);
+    return visibleContentSent;
+  }
+
+  async discard(): Promise<void> {
+    if (!this.state || this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.clearFlushTimer();
+    await this.queue;
+
+    const currentState = this.state;
+    try {
+      const response = await this.client.im.message.delete({
+        path: { message_id: currentState.messageId },
+      });
+      if (response.code !== undefined && response.code !== 0) {
+        throw new Error(`Delete streaming card message failed: ${response.msg ?? response.code}`);
+      }
+      this.state = null;
+      this.pendingText = null;
+      this.log?.(`Discarded streaming card: cardId=${currentState.cardId}`);
+    } catch (error) {
+      this.log?.(`Discard failed: ${String(error)}`);
+      this.closed = false;
+      await this.close("");
+    }
   }
 
   isActive(): boolean {
