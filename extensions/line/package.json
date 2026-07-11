@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",
-    "openclaw": "workspace:*"
+    "openclaw": "workspace:@bitplanet/genie-openclaw@*"
   },
   "peerDependencies": {
     "openclaw": ">=2026.6.11"

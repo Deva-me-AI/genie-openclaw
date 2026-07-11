@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",
-    "openclaw": "workspace:*"
+    "openclaw": "workspace:@bitplanet/genie-openclaw@*"
   },
   "openclaw": {
     "extensions": [

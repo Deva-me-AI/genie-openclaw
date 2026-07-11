@@ -519,7 +519,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/cloudflare-ai-gateway:
@@ -714,7 +714,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/document-extract:
@@ -773,7 +773,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/file-transfer:
@@ -847,7 +847,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/googlechat:
@@ -866,7 +866,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/gradium:
@@ -944,7 +944,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/litellm:
@@ -994,7 +994,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/longcat:
@@ -1034,7 +1034,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/mattermost:
@@ -1050,7 +1050,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/media-understanding-core:
@@ -1075,7 +1075,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/memory-lancedb:
@@ -1116,7 +1116,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/meta:
@@ -1147,7 +1147,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/migrate-hermes:
@@ -1160,7 +1160,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/minimax:
@@ -1206,7 +1206,7 @@ importers:
         specifier: 6.2.3
         version: 6.2.3
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/nextcloud-talk:
@@ -1219,7 +1219,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/nostr:
@@ -1235,7 +1235,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/novita:
@@ -1269,7 +1269,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/ollama:
@@ -1344,7 +1344,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/policy:
@@ -1357,7 +1357,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/qa-channel:
@@ -1373,7 +1373,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/qa-lab:
@@ -1410,7 +1410,7 @@ importers:
         specifier: workspace:*
         version: link:../whatsapp
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/qa-matrix:
@@ -1426,7 +1426,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/qianfan:
@@ -1460,7 +1460,7 @@ importers:
         specifier: 8.18.1
         version: 8.18.1
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/qwen:
@@ -1479,7 +1479,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/runway:
@@ -1541,7 +1541,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/sms:
@@ -1636,7 +1636,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/together:
@@ -1655,7 +1655,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/tts-local-cli:
@@ -1732,7 +1732,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/volcengine:
@@ -1792,7 +1792,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/workboard:
@@ -1805,7 +1805,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/xai:
@@ -1843,7 +1843,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   extensions/zalouser:
@@ -1862,7 +1862,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   packages/acp-core:
@@ -1978,7 +1978,7 @@ importers:
   packages/speech-core:
     dependencies:
       openclaw:
-        specifier: workspace:*
+        specifier: workspace:@bitplanet/genie-openclaw@*
         version: link:../..
 
   packages/terminal-core:
