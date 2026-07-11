@@ -786,6 +786,19 @@ describe("ci workflow guards", () => {
     expect(source).toContain("blacksmith-8vcpu-windows-2025");
   });
 
+  it("hashes extension package boundary sources before installing workspace dependencies", () => {
+    const workflow = readCiWorkflow();
+    const steps = workflow.jobs["check-additional-shard"].steps as Array<{
+      id?: string;
+      name?: string;
+    }>;
+    const cacheIndex = steps.findIndex((step) => step.id === "extension-package-boundary-cache");
+    const setupIndex = steps.findIndex((step) => step.name === "Setup Node environment");
+
+    expect(cacheIndex).toBeGreaterThan(0);
+    expect(cacheIndex).toBeLessThan(setupIndex);
+  });
+
   it("runs the session accessor ratchet as a visible additional check", () => {
     const workflow = readCiWorkflow();
     const additionalJob = workflow.jobs["check-additional-shard"];
