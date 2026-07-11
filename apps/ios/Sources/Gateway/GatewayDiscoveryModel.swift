@@ -52,14 +52,16 @@ final class GatewayDiscoveryModel {
     }
 
     func start() {
-        if !self.browsers.isEmpty { return }
+        if !self.browsers.isEmpty {
+            return
+        }
         self.appendDebugLog("start()")
 
         for domain in OpenClawBonjour.gatewayServiceDomains {
             let browser = GatewayDiscoveryBrowserSupport.makeBrowser(
                 serviceType: OpenClawBonjour.gatewayServiceType,
                 domain: domain,
-                queueLabelPrefix: "ai.openclaw.ios.gateway-discovery",
+                queueLabelPrefix: "ai.openclawfoundation.app.gateway-discovery",
                 onState: { [weak self] state in
                     guard let self else { return }
                     self.statesByDomain[domain] = state

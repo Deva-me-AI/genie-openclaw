@@ -1,3 +1,4 @@
+// Covers native hook relay registration, bridge invocation, and approval state.
 import { randomUUID } from "node:crypto";
 import { rmSync, statSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
@@ -37,6 +38,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  // Relay bridge payloads cross a process boundary. Tests narrow unknown JSON
+  // before making assertions so malformed bridge responses fail clearly.
   if (!isRecord(value)) {
     throw new Error(`Expected ${label} to be an object`);
   }
@@ -90,6 +93,8 @@ async function writeForeignNativeHookRelayBridgeRecordForTests(
     expiresAtMs: number;
   },
 ): Promise<string> {
+  // Foreign bridge records simulate another process owning the relay server,
+  // without starting a second OpenClaw process in the unit test.
   const bridgeDir = testing.getNativeHookRelayBridgeDirForTests();
   await fs.mkdir(bridgeDir, { recursive: true, mode: 0o700 });
   const registryPath = testing.getNativeHookRelayBridgeRegistryPathForTests(relayId);
@@ -191,6 +196,8 @@ type NativeHookRelaySharedStateForTests = {
 };
 
 function getNativeHookRelaySharedStateForTests(): NativeHookRelaySharedStateForTests {
+  // Native relay state is intentionally shared on globalThis so duplicate
+  // module imports in one process still see one approval/bridge registry.
   const state = (
     globalThis as typeof globalThis & {
       [key: symbol]: NativeHookRelaySharedStateForTests | undefined;
@@ -242,6 +249,28 @@ describe("native hook relay registry", () => {
       "/usr/local/bin/node '/opt/Open Claw/openclaw.mjs' hooks relay --provider codex --relay-id " +
         `${relay.relayId} --generation ${relay.generation} --event pre_tool_use --timeout 1234`,
     );
+    expect(relay.commandForEvent("pre_tool_use", { timeoutMs: 900 })).toBe(
+      "/usr/local/bin/node '/opt/Open Claw/openclaw.mjs' hooks relay --provider codex --relay-id " +
+        `${relay.relayId} --generation ${relay.generation} --event pre_tool_use --timeout 900`,
+    );
+    expect(relay.commandForEvent("pre_tool_use", { timeoutMs: 2_000 })).toBe(
+      "/usr/local/bin/node '/opt/Open Claw/openclaw.mjs' hooks relay --provider codex --relay-id " +
+        `${relay.relayId} --generation ${relay.generation} --event pre_tool_use --timeout 1234`,
+    );
+  });
+
+  it("rejects relay registrations when expiry would exceed Date range", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(8_640_000_000_000_000));
+
+    expect(() =>
+      registerNativeHookRelay({
+        provider: "codex",
+        sessionId: "session-1",
+        runId: "run-1",
+        allowedEvents: ["pre_tool_use"],
+      }),
+    ).toThrow("Native hook relay expiry is outside the supported Date range");
   });
 
   it("stores relay registrations, bridges, and invocations in process-global state", async () => {
@@ -333,6 +362,58 @@ describe("native hook relay registry", () => {
       }),
     ).resolves.toMatchObject({ exitCode: 0 });
     expect(approvalRequester).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not remember allow-always approvals when expiry would exceed Date range", async () => {
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      relayId: "codex-permission-overflow-session",
+      sessionId: "session-1",
+      runId: "run-1",
+    });
+    const approvalRequester = vi.fn(async () => "allow-always" as const);
+    testing.setNativeHookRelayPermissionApprovalRequesterForTests(approvalRequester);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(8_640_000_000_000_000));
+    const state = getNativeHookRelaySharedStateForTests();
+    const registration = state.relays.get(relay.relayId) as { expiresAtMs?: number } | undefined;
+    if (!registration) {
+      throw new Error("Expected native hook relay registration");
+    }
+    registration.expiresAtMs = 8_640_000_000_000_000;
+
+    await expect(
+      invokeNativeHookRelay({
+        provider: "codex",
+        relayId: relay.relayId,
+        event: "permission_request",
+        rawPayload: {
+          hook_event_name: "PermissionRequest",
+          cwd: "/repo",
+          tool_name: "Bash",
+          tool_use_id: "native-call-1",
+          tool_input: { command: "browserforce tabs" },
+        },
+      }),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    expect(state.permissionAllowAlwaysApprovals.size).toBe(0);
+
+    await expect(
+      invokeNativeHookRelay({
+        provider: "codex",
+        relayId: relay.relayId,
+        event: "permission_request",
+        rawPayload: {
+          hook_event_name: "PermissionRequest",
+          cwd: "/repo",
+          tool_name: "Bash",
+          tool_use_id: "native-call-2",
+          tool_input: { command: "browserforce tabs" },
+        },
+      }),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    expect(approvalRequester).toHaveBeenCalledTimes(2);
   });
 
   it("shares relay state across duplicate module instances", async () => {
@@ -459,6 +540,10 @@ describe("native hook relay registry", () => {
     expect(relay.shouldRelayEvent("post_tool_use")).toBe(false);
     expect(relay.shouldRelayEvent("before_agent_finalize")).toBe(false);
     expect(relay.shouldRelayEvent("permission_request")).toBe(true);
+    expect(relay.commandForEvent("pre_tool_use")).toBe(
+      "/usr/local/bin/node '/opt/Open Claw/openclaw.mjs' hooks relay --provider codex --relay-id " +
+        `${relay.relayId} --generation ${relay.generation} --event pre_tool_use --pre-tool-use-unavailable noop --timeout 1234`,
+    );
   });
 
   it("builds pre-tool relay commands only when before-tool policy is active", () => {
@@ -685,7 +770,9 @@ describe("native hook relay registry", () => {
       },
     });
     await staleRequest.connected;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
 
     const second = registerNativeHookRelay({
       provider: "codex",
@@ -845,7 +932,9 @@ describe("native hook relay registry", () => {
       allowedEvents: ["pre_tool_use"],
       generationMismatchGraceMs: 1,
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
 
     await expect(
       invokeNativeHookRelayBridge({
@@ -875,7 +964,9 @@ describe("native hook relay registry", () => {
     });
     const before = await waitForNativeHookRelayBridgeRecord(relay.relayId);
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
     relay.renew(20_000);
 
     const after = await waitForNativeHookRelayBridgeRecord(relay.relayId);
@@ -1279,6 +1370,32 @@ describe("native hook relay registry", () => {
     expect(String(rawPayload.tool_response)).toContain("[truncated]");
   });
 
+  it("retains payload snapshots without splitting surrogate pairs", async () => {
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      sessionId: "session-1",
+      runId: "run-1",
+      allowedEvents: ["post_tool_use"],
+    });
+
+    await invokeNativeHookRelay({
+      provider: "codex",
+      relayId: relay.relayId,
+      event: "post_tool_use",
+      rawPayload: {
+        tool_response: `${"a".repeat(3_999)}😀tail`,
+      },
+    });
+
+    const [recorded] = testing.getNativeHookRelayInvocationsForTests();
+    const rawPayload = readRecordField(
+      requireRecord(recorded, "native hook relay invocation"),
+      "rawPayload",
+      "invocation raw payload",
+    );
+    expect(rawPayload.tool_response).toBe(`${"a".repeat(3_999)}...[truncated]`);
+  });
+
   it("removes retained invocations when a relay is unregistered", async () => {
     const relay = registerNativeHookRelay({
       provider: "codex",
@@ -1587,6 +1704,163 @@ describe("native hook relay registry", () => {
       toolName: "exec",
       toolCallId: "native-call-1",
     });
+  });
+
+  it("keeps a native pre-tool hook timeout distinct from a policy denial", async () => {
+    const onPreToolUseFailure = vi.fn();
+    const beforeToolCall = vi.fn(async () => {
+      throw Object.assign(new Error("timed out after 5000ms"), { name: "TimeoutError" });
+    });
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([{ hookName: "before_tool_call", handler: beforeToolCall }]),
+    );
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      agentId: "agent-1",
+      sessionId: "session-1",
+      runId: "run-1",
+      onPreToolUseFailure,
+    });
+
+    const response = await invokeNativeHookRelay({
+      provider: "codex",
+      relayId: relay.relayId,
+      event: "pre_tool_use",
+      rawPayload: {
+        hook_event_name: "PreToolUse",
+        cwd: "/repo",
+        tool_name: "exec_command",
+        tool_use_id: "native-timeout-1",
+        tool_input: { cmd: "pnpm test" },
+      },
+    });
+
+    expect(response.failureDisposition).toBe("timed_out");
+    expect(JSON.parse(response.stdout)).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
+    expect(onPreToolUseFailure).toHaveBeenCalledWith({
+      toolName: "exec",
+      toolCallId: "native-timeout-1",
+      disposition: "timed_out",
+      durationMs: expect.any(Number),
+    });
+
+    await invokeNativeHookRelay({
+      provider: "codex",
+      relayId: relay.relayId,
+      event: "pre_tool_use",
+      rawPayload: {
+        hook_event_name: "PreToolUse",
+        tool_name: "exec_command",
+        tool_use_id: "native-timeout-1",
+        tool_input: { cmd: "pnpm test" },
+      },
+    });
+    expect(onPreToolUseFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates an asynchronously rejected native failure projection", async () => {
+    const onPreToolUseFailure = vi.fn(async () => {
+      throw new Error("diagnostic sink unavailable");
+    });
+    const beforeToolCall = vi.fn(async () => {
+      throw new Error("hook crashed");
+    });
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([{ hookName: "before_tool_call", handler: beforeToolCall }]),
+    );
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      sessionId: "session-1",
+      runId: "run-1",
+      onPreToolUseFailure,
+    });
+
+    await expect(
+      invokeNativeHookRelay({
+        provider: "codex",
+        relayId: relay.relayId,
+        event: "pre_tool_use",
+        rawPayload: {
+          hook_event_name: "PreToolUse",
+          tool_name: "exec_command",
+          tool_use_id: "native-failed-projection",
+          tool_input: { cmd: "pnpm test" },
+        },
+      }),
+    ).resolves.toMatchObject({ failureDisposition: "failed" });
+    expect(onPreToolUseFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not delay a native hook response on a pending failure projection", async () => {
+    const onPreToolUseFailure = vi.fn(
+      () =>
+        new Promise<void>(() => {
+          // Deliberately remain pending to prove projection does not block the response.
+        }),
+    );
+    const beforeToolCall = vi.fn(async () => {
+      throw new Error("hook crashed");
+    });
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([{ hookName: "before_tool_call", handler: beforeToolCall }]),
+    );
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      sessionId: "session-1",
+      runId: "run-1",
+      onPreToolUseFailure,
+    });
+    const invoke = () =>
+      invokeNativeHookRelay({
+        provider: "codex",
+        relayId: relay.relayId,
+        event: "pre_tool_use",
+        rawPayload: {
+          hook_event_name: "PreToolUse",
+          tool_name: "exec_command",
+          tool_use_id: "native-pending-projection",
+          tool_input: { cmd: "pnpm test" },
+        },
+      });
+
+    await expect(invoke()).resolves.toMatchObject({ failureDisposition: "failed" });
+    await expect(invoke()).resolves.toMatchObject({ failureDisposition: "failed" });
+    expect(onPreToolUseFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves report-mode pre-tool failure projection to the approval owner", async () => {
+    const onPreToolUseFailure = vi.fn();
+    const beforeToolCall = vi.fn(async () => {
+      throw Object.assign(new Error("timed out after 5000ms"), { name: "TimeoutError" });
+    });
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([{ hookName: "before_tool_call", handler: beforeToolCall }]),
+    );
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      agentId: "agent-1",
+      sessionId: "session-1",
+      runId: "run-1",
+      onPreToolUseFailure,
+    });
+
+    const response = await invokeNativeHookRelay({
+      provider: "codex",
+      relayId: relay.relayId,
+      event: "pre_tool_use",
+      rawPayload: {
+        hook_event_name: "PreToolUse",
+        openclaw_approval_mode: "report",
+        tool_name: "exec_command",
+        tool_use_id: "native-report-timeout",
+        tool_input: { cmd: "pnpm test" },
+      },
+    });
+
+    expect(response.failureDisposition).toBe("timed_out");
+    expect(onPreToolUseFailure).not.toHaveBeenCalled();
   });
 
   it("normalizes Codex exec_command cmd input before running OpenClaw policy", async () => {
@@ -1966,6 +2240,57 @@ describe("native hook relay registry", () => {
         toolUseId: "native-approval-report-duplicate",
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("preserves deferred native approval cancellation as a terminal disposition", async () => {
+    const beforeToolCall = vi.fn(async () => ({
+      requireApproval: {
+        title: "Needs approval",
+        description: "native command needs approval",
+      },
+    }));
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([{ hookName: "before_tool_call", handler: beforeToolCall }]),
+    );
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      agentId: "agent-1",
+      sessionId: "session-1",
+      runId: "run-1",
+    });
+
+    await invokeNativeHookRelay({
+      provider: "codex",
+      relayId: relay.relayId,
+      event: "pre_tool_use",
+      rawPayload: {
+        hook_event_name: "PreToolUse",
+        openclaw_approval_mode: "report",
+        cwd: "/repo",
+        tool_name: "exec_command",
+        tool_use_id: "native-approval-cancelled",
+        tool_input: { cmd: "pnpm test" },
+      },
+    });
+    testing.setNativeHookRelayDeferredToolApprovalRequesterForTests(async () => ({
+      blocked: true,
+      kind: "failure",
+      disposition: "cancelled",
+      deniedReason: "plugin-approval",
+      reason: "Approval cancelled because the run stopped",
+    }));
+
+    await expect(
+      resolveNativeHookRelayDeferredToolApproval({
+        relayId: relay.relayId,
+        toolUseId: "native-approval-cancelled",
+      }),
+    ).resolves.toEqual({
+      handled: true,
+      outcome: "denied",
+      reason: "Approval cancelled because the run stopped",
+      failureDisposition: "cancelled",
+    });
   });
 
   it("passes config to trusted policies for native pre-tool session extension reads", async () => {
@@ -3108,6 +3433,20 @@ describe("native hook relay registry", () => {
       }),
     ).toContain("(1 omitted)");
   });
+
+  it("truncates PermissionRequest approval previews without splitting surrogate pairs", () => {
+    expect(
+      testing.formatPermissionApprovalDescriptionForTests({
+        provider: "codex",
+        sessionId: "session-1",
+        runId: "run-1",
+        toolName: "exec",
+        toolInput: {
+          command: `${"a".repeat(236)}😀tail`,
+        },
+      }),
+    ).toBe(`Tool: exec\nCommand: ${"a".repeat(236)}...`);
+  });
 });
 
 describe("native hook relay command builder", () => {
@@ -3122,6 +3461,21 @@ describe("native hook relay command builder", () => {
       }),
     ).toBe(
       "openclaw hooks relay --provider codex --relay-id relay-1 --generation generation-1 --event permission_request --timeout 5000",
+    );
+  });
+
+  it("includes explicit unavailable noop mode only for PreToolUse", () => {
+    expect(
+      buildNativeHookRelayCommand({
+        provider: "codex",
+        relayId: "relay-1",
+        generation: "generation-1",
+        event: "pre_tool_use",
+        preToolUseUnavailable: "noop",
+        executable: "openclaw",
+      }),
+    ).toBe(
+      "openclaw hooks relay --provider codex --relay-id relay-1 --generation generation-1 --event pre_tool_use --pre-tool-use-unavailable noop --timeout 5000",
     );
   });
 });

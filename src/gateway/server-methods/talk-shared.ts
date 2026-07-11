@@ -1,3 +1,11 @@
+// Talk shared helpers build provider configs, launch options, tool schemas, and
+// room event broadcasts used by browser and gateway-owned Talk sessions.
+import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
 import { ErrorCodes } from "../../../packages/gateway-protocol/src/index.js";
 import {
   getVoiceProviderConfig,
@@ -5,14 +13,13 @@ import {
   resolveSupportedVoiceModelRefs,
   type VoiceModelProvider,
 } from "../../../packages/speech-core/voice-models.js";
+import type { TalkRealtimeConfig } from "../../config/types.gateway.js";
 import type { OpenClawConfig } from "../../config/types.js";
-import { listRealtimeTranscriptionProviders } from "../../realtime-transcription/provider-registry.js";
-import type { RealtimeTranscriptionProviderConfig } from "../../realtime-transcription/provider-types.js";
 import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "../../shared/string-coerce.js";
+  getRealtimeTranscriptionProvider,
+  listRealtimeTranscriptionProviders,
+} from "../../realtime-transcription/provider-registry.js";
+import type { RealtimeTranscriptionProviderConfig } from "../../realtime-transcription/provider-types.js";
 import { REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME } from "../../talk/agent-consult-tool.js";
 import { REALTIME_VOICE_AGENT_CONTROL_TOOL_NAME } from "../../talk/agent-run-control-shared.js";
 import { listRealtimeVoiceProviders } from "../../talk/provider-registry.js";
@@ -23,7 +30,6 @@ import type {
 import type { TalkEvent } from "../../talk/talk-events.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
 import type { TalkHandoffTurnResult } from "../talk-handoff.js";
-import { asRecord } from "./record-shared.js";
 
 export function canUseTalkDirectTools(client: { connect?: { scopes?: string[] } } | null): boolean {
   const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
@@ -64,7 +70,7 @@ export function talkHandoffErrorCode(reason: TalkHandoffFailureReason) {
 }
 
 function getRecord(value: unknown): Record<string, unknown> | undefined {
-  return asRecord(value) ?? undefined;
+  return asOptionalRecord(value) ?? undefined;
 }
 
 function singleRecordKey(record: Record<string, unknown> | undefined): string | undefined {
@@ -72,54 +78,77 @@ function singleRecordKey(record: Record<string, unknown> | undefined): string | 
   return keys.length === 1 ? keys[0] : undefined;
 }
 
-function getVoiceCallRealtimeConfig(config: OpenClawConfig): {
+function normalizeRealtimeTransport(value: unknown): TalkRealtimeConfig["transport"] {
+  const transport = normalizeOptionalLowercaseString(value);
+  return transport === "webrtc" ||
+    transport === "provider-websocket" ||
+    transport === "gateway-relay" ||
+    transport === "managed-room"
+    ? transport
+    : undefined;
+}
+
+function getVoiceCallProviderConfig<TConfig extends Record<string, unknown>>(
+  config: OpenClawConfig,
+  sectionName: "realtime" | "streaming",
+): {
   provider?: string;
-  providers?: Record<string, RealtimeVoiceProviderConfig>;
+  providers?: Record<string, TConfig>;
 } {
   const plugins = getRecord(config.plugins);
   const entries = getRecord(plugins?.entries);
   const voiceCall = getRecord(entries?.["voice-call"]);
   const pluginConfig = getRecord(voiceCall?.config);
-  const realtime = getRecord(pluginConfig?.realtime);
-  const providersRaw = getRecord(realtime?.providers);
-  const providers: Record<string, RealtimeVoiceProviderConfig> = {};
+  const section = getRecord(pluginConfig?.[sectionName]);
+  const providersRaw = getRecord(section?.providers);
+  const providers: Record<string, TConfig> = {};
   if (providersRaw) {
     for (const [providerId, providerConfig] of Object.entries(providersRaw)) {
       const record = getRecord(providerConfig);
       if (record) {
-        providers[providerId] = record;
+        providers[providerId] = record as TConfig;
       }
     }
   }
   return {
-    provider: normalizeOptionalString(realtime?.provider),
+    provider: normalizeOptionalString(section?.provider),
     providers: Object.keys(providers).length > 0 ? providers : undefined,
   };
 }
 
-export function getVoiceCallStreamingConfig(config: OpenClawConfig): {
+function getVoiceCallRealtimeConfig(config: OpenClawConfig): {
+  provider?: string;
+  providers?: Record<string, RealtimeVoiceProviderConfig>;
+} {
+  return getVoiceCallProviderConfig(config, "realtime");
+}
+
+function getVoiceCallStreamingConfig(config: OpenClawConfig): {
   provider?: string;
   providers?: Record<string, RealtimeTranscriptionProviderConfig>;
 } {
-  const plugins = getRecord(config.plugins);
-  const entries = getRecord(plugins?.entries);
-  const voiceCall = getRecord(entries?.["voice-call"]);
-  const pluginConfig = getRecord(voiceCall?.config);
-  const streaming = getRecord(pluginConfig?.streaming);
-  const providersRaw = getRecord(streaming?.providers);
-  const providers: Record<string, RealtimeTranscriptionProviderConfig> = {};
-  if (providersRaw) {
-    for (const [providerId, providerConfig] of Object.entries(providersRaw)) {
-      const record = getRecord(providerConfig);
-      if (record) {
-        providers[providerId] = record;
-      }
+  return getVoiceCallProviderConfig(config, "streaming");
+}
+
+export function listTalkTranscriptionProviders(
+  config: OpenClawConfig,
+  configuredProviderIds: Iterable<string | undefined>,
+) {
+  const providers = listRealtimeTranscriptionProviders(config);
+  for (const providerId of configuredProviderIds) {
+    const configuredProvider = getRealtimeTranscriptionProvider(providerId, config);
+    if (
+      configuredProvider &&
+      !providers.some(
+        (provider) =>
+          normalizeOptionalLowercaseString(provider.id) ===
+          normalizeOptionalLowercaseString(configuredProvider.id),
+      )
+    ) {
+      providers.push(configuredProvider);
     }
   }
-  return {
-    provider: normalizeOptionalString(streaming?.provider),
-    providers: Object.keys(providers).length > 0 ? providers : undefined,
-  };
+  return providers;
 }
 
 type RealtimeProviderWithConfig<TConfig extends Record<string, unknown>> = VoiceModelProvider & {
@@ -179,6 +208,8 @@ export function buildTalkRealtimeConfig(config: OpenClawConfig, requestedProvide
   const configuredProvider =
     explicitProvider ?? singleConfiguredProvider ?? voiceCallRealtime.provider;
   const selectedProvider = configuredProvider ?? singleConfiguredProvider;
+  // Talk-local realtime config wins over the legacy voice-call plugin config,
+  // while the legacy config remains a bridge for existing installations.
   const providerConfigs = {
     ...voiceCallRealtime.providers,
     ...talkRealtimeProviderConfigs,
@@ -201,7 +232,22 @@ export function buildTalkRealtimeConfig(config: OpenClawConfig, requestedProvide
       normalizeOptionalString(talkRealtime?.voice),
     instructions: normalizeOptionalString(talkRealtime?.instructions),
     mode: normalizeOptionalLowercaseString(talkRealtime?.mode),
-    transport: normalizeOptionalLowercaseString(talkRealtime?.transport),
+    transport: normalizeRealtimeTransport(talkRealtime?.transport),
+    vadThreshold:
+      typeof talkRealtime?.vadThreshold === "number" && Number.isFinite(talkRealtime.vadThreshold)
+        ? talkRealtime.vadThreshold
+        : undefined,
+    silenceDurationMs:
+      typeof talkRealtime?.silenceDurationMs === "number" &&
+      Number.isFinite(talkRealtime.silenceDurationMs)
+        ? talkRealtime.silenceDurationMs
+        : undefined,
+    prefixPaddingMs:
+      typeof talkRealtime?.prefixPaddingMs === "number" &&
+      Number.isFinite(talkRealtime.prefixPaddingMs)
+        ? talkRealtime.prefixPaddingMs
+        : undefined,
+    reasoningEffort: normalizeOptionalString(talkRealtime?.reasoningEffort),
     brain: normalizeOptionalLowercaseString(talkRealtime?.brain),
     consultRouting: normalizeOptionalLowercaseString(talkRealtime?.consultRouting),
   };
@@ -211,11 +257,12 @@ export function buildTalkTranscriptionConfig(config: OpenClawConfig, requestedPr
   const streamingConfig = getVoiceCallStreamingConfig(config);
   const provider = normalizeOptionalString(requestedProvider) ?? streamingConfig.provider;
   const providerConfigs = streamingConfig.providers ?? {};
+  const configuredProviderIds = [provider, ...Object.keys(providerConfigs)];
   const voiceModelDefault = resolveConfiguredVoiceModelDefaultRef({
     config,
     provider,
     providerConfigs,
-    providers: listRealtimeTranscriptionProviders(config),
+    providers: listTalkTranscriptionProviders(config, configuredProviderIds),
   });
   return {
     provider: provider ?? voiceModelDefault?.provider,
@@ -238,16 +285,16 @@ export function resolveConfiguredRealtimeTranscriptionProvider(params: {
   providerConfigs: Record<string, RealtimeTranscriptionProviderConfig>;
   defaultModel?: string;
 }) {
-  const providers = listRealtimeTranscriptionProviders(params.config);
   const normalizedConfigured = normalizeOptionalLowercaseString(params.configuredProviderId);
-  const orderedProviders = normalizedConfigured
-    ? providers.filter(
-        (provider) =>
-          normalizeOptionalLowercaseString(provider.id) === normalizedConfigured ||
-          (provider.aliases ?? []).some(
-            (alias) => normalizeOptionalLowercaseString(alias) === normalizedConfigured,
-          ),
+  const providers = normalizedConfigured
+    ? [getRealtimeTranscriptionProvider(normalizedConfigured, params.config)].filter(
+        (provider) => provider !== undefined,
       )
+    : listTalkTranscriptionProviders(params.config, Object.keys(params.providerConfigs));
+  // An explicit provider is authoritative; automatic selection is stable by
+  // provider order so the same config picks the same transcription backend.
+  const orderedProviders = normalizedConfigured
+    ? providers
     : providers.toSorted((a, b) => (a.autoSelectOrder ?? 1000) - (b.autoSelectOrder ?? 1000));
   for (const provider of orderedProviders) {
     const rawConfig = getVoiceProviderConfig({
@@ -288,6 +335,8 @@ export function buildRealtimeInstructions(configuredInstructions?: string): stri
   if (!extra) {
     return DEFAULT_REALTIME_INSTRUCTIONS;
   }
+  // Keep the tool-use contract first, then append operator customization so
+  // provider sessions preserve the same control-tool behavior.
   return `${DEFAULT_REALTIME_INSTRUCTIONS}\n\nAdditional realtime instructions:\n${extra}`;
 }
 
@@ -314,6 +363,8 @@ export function buildRealtimeVoiceLaunchOptions(params: {
   defaults: RealtimeVoiceLaunchOptions;
 }): RealtimeVoiceLaunchOptions {
   const options = pickRealtimeVoiceLaunchOptions(params.defaults);
+  // Per-request browser controls override config defaults, but only when they
+  // are valid primitive values the realtime provider can consume.
   return {
     ...options,
     ...pickRealtimeVoiceLaunchOptions(params.requested),
@@ -380,5 +431,7 @@ function pickRealtimeVoiceLaunchOptions(
 export function isUnsupportedBrowserWebRtcSession(session: RealtimeVoiceBrowserSession): boolean {
   const provider = normalizeLowercaseStringOrEmpty(session.provider);
   const transport = (session as { transport?: string }).transport ?? "webrtc";
+  // Google browser WebRTC sessions are exposed in provider types but not usable
+  // through the current client-owned Talk flow.
   return provider === "google" && transport === "webrtc";
 }

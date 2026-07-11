@@ -39,6 +39,12 @@ extension CronJobEditor {
             self.scheduleKind = .cron
             self.cronExpr = expr
             self.cronTz = tz ?? ""
+        case .onExit:
+            // on-exit jobs are CLI-managed and have no editor form yet; fall back to
+            // the cron form so the editor still OPENS instead of failing to compile.
+            // Saving an on-exit job from the editor should be gated to avoid rewriting
+            // it as cron — tracked as a macOS read-only-editor follow-up.
+            self.scheduleKind = .cron
         }
 
         switch job.payload {
@@ -74,6 +80,18 @@ extension CronJobEditor {
     }
 
     func buildPayload() throws -> [String: AnyCodable] {
+        // Gate on-exit saves: the editor has no on-exit schedule form (it falls back to
+        // the cron form), so saving would rewrite the on-exit schedule as cron and
+        // corrupt the job. Block it until a read-only/native on-exit editor exists.
+        if let job, case .onExit = job.schedule {
+            throw NSError(
+                domain: "Cron",
+                code: 0,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "on-exit cron jobs can't be edited in the macOS app yet; manage them with the CLI.",
+                ])
+        }
         let name = try self.requireName()
         let description = self.trimmed(self.description)
         let agentId = self.trimmed(self.agentId)
@@ -92,7 +110,9 @@ extension CronJobEditor {
             "payload": payload,
         ]
         self.applyDeleteAfterRun(to: &root)
-        if !description.isEmpty { root["description"] = description }
+        if !description.isEmpty {
+            root["description"] = description
+        }
         if !agentId.isEmpty {
             root["agentId"] = agentId
         } else if self.job?.agentId != nil {
@@ -113,7 +133,9 @@ extension CronJobEditor {
             let trimmed = self.channel.trimmingCharacters(in: .whitespacesAndNewlines)
             delivery["channel"] = trimmed.isEmpty ? "last" : trimmed
             let to = self.to.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !to.isEmpty { delivery["to"] = to }
+            if !to.isEmpty {
+                delivery["to"] = to
+            }
             if self.bestEffortDeliver {
                 delivery["bestEffort"] = true
             } else if self.job?.delivery?.bestEffort == true {
@@ -167,7 +189,9 @@ extension CronJobEditor {
     }
 
     func buildSelectedPayload() throws -> [String: Any] {
-        if self.isIsolatedLikeSessionTarget { return self.buildAgentTurnPayload() }
+        if self.isIsolatedLikeSessionTarget {
+            return self.buildAgentTurnPayload()
+        }
         switch self.payloadKind {
         case .systemEvent:
             let text = self.trimmed(self.systemEventText)
@@ -233,14 +257,20 @@ extension CronJobEditor {
         let msg = self.agentMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         var payload: [String: Any] = ["kind": "agentTurn", "message": msg]
         let thinking = self.thinking.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !thinking.isEmpty { payload["thinking"] = thinking }
-        if let n = Int(self.timeoutSeconds), n > 0 { payload["timeoutSeconds"] = n }
+        if !thinking.isEmpty {
+            payload["thinking"] = thinking
+        }
+        if let n = Int(self.timeoutSeconds), n > 0 {
+            payload["timeoutSeconds"] = n
+        }
         return payload
     }
 
     static func parseDurationMs(_ input: String) -> Int? {
         let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.isEmpty { return nil }
+        if raw.isEmpty {
+            return nil
+        }
 
         let rx = try? NSRegularExpression(pattern: "^(\\d+(?:\\.\\d+)?)(ms|s|m|h|d)$", options: [.caseInsensitive])
         guard let match = rx?.firstMatch(in: raw, range: NSRange(location: 0, length: raw.utf16.count)) else {
@@ -252,7 +282,9 @@ extension CronJobEditor {
             return String(raw[r])
         }
         let n = Double(group(1)) ?? 0
-        if !n.isFinite || n <= 0 { return nil }
+        if !n.isFinite || n <= 0 {
+            return nil
+        }
         let unit = group(2).lowercased()
         let factor: Double = switch unit {
         case "ms": 1

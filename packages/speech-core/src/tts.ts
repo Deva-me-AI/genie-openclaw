@@ -1,3 +1,4 @@
+// Speech Core module implements tts behavior.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { resolveChannelTtsVoiceDelivery } from "openclaw/plugin-sdk/channel-targets";
@@ -12,6 +13,7 @@ import type {
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { redactSensitiveText } from "openclaw/plugin-sdk/logging-core";
 import { transcodeAudioBuffer } from "openclaw/plugin-sdk/media-runtime";
+import { clampTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import {
   markReplyPayloadAsTtsSupplement,
   resolveSendableOutboundReplyParts,
@@ -31,7 +33,11 @@ import {
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { stripMarkdown } from "openclaw/plugin-sdk/text-chunking";
-import { resolveConfigDir, resolveUserPath } from "openclaw/plugin-sdk/text-utility-runtime";
+import {
+  resolveConfigDir,
+  resolveUserPath,
+  truncateUtf16Safe,
+} from "openclaw/plugin-sdk/text-utility-runtime";
 import {
   canonicalizeSpeechProviderId,
   getSpeechProvider,
@@ -78,7 +84,7 @@ const DEFAULT_MAX_TEXT_LENGTH = 4096;
 
 function resolvePositiveTimeoutMs(timeoutMs: number | undefined): number | undefined {
   return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
-    ? Math.floor(timeoutMs)
+    ? clampTimerTimeoutMs(timeoutMs)
     : undefined;
 }
 
@@ -88,10 +94,10 @@ function resolveSpeechProviderTimeoutMs(params: {
   provider: Pick<SpeechProviderPlugin, "defaultTimeoutMs">;
 }): number {
   if (params.timeoutMs !== undefined) {
-    return params.timeoutMs;
+    return resolvePositiveTimeoutMs(params.timeoutMs) ?? params.config.timeoutMs;
   }
   if (params.config.timeoutMsSource !== "default") {
-    return params.config.timeoutMs;
+    return resolvePositiveTimeoutMs(params.config.timeoutMs) ?? DEFAULT_TIMEOUT_MS;
   }
   return resolvePositiveTimeoutMs(params.provider.defaultTimeoutMs) ?? params.config.timeoutMs;
 }
@@ -361,7 +367,7 @@ function asProviderConfigMap(value: unknown): Record<string, unknown> {
 }
 
 function hasOwnProperty(value: object, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
+  return Object.hasOwn(value, key);
 }
 
 function normalizeProviderConfigMap(
@@ -597,9 +603,10 @@ function getResolvedSpeechProviderConfigForVoiceModel(params: {
 }
 
 export function resolveTtsConfig(
-  cfg: OpenClawConfig,
+  cfgInput: OpenClawConfig,
   contextOrAgentId?: string | TtsConfigResolutionContext,
 ): ResolvedTtsConfig {
+  let cfg = cfgInput;
   cfg = resolveTtsRuntimeConfig(cfg);
   const raw: TtsConfig = resolveEffectiveTtsConfig(cfg, contextOrAgentId);
   const providerSource = raw.provider ? "config" : "default";
@@ -690,9 +697,10 @@ function resolveEffectiveTtsAutoState(params: {
 }
 
 export function buildTtsSystemPromptHint(
-  cfg: OpenClawConfig,
+  cfgInput: OpenClawConfig,
   agentId?: string,
 ): string | undefined {
+  let cfg = cfgInput;
   cfg = resolveTtsRuntimeConfig(cfg);
   const { autoMode, prefsPath } = resolveEffectiveTtsAutoState({ cfg, agentId });
   if (autoMode === "off") {
@@ -1924,6 +1932,10 @@ export async function listSpeechVoices(params: {
   });
 }
 
+function hasLegacyFinalMediaDirective(text: string): boolean {
+  return /(?:^|\n)\s*MEDIA\s*:/i.test(text);
+}
+
 export async function maybeApplyTtsToPayload(params: {
   payload: ReplyPayload;
   cfg: OpenClawConfig;
@@ -2004,10 +2016,7 @@ export async function maybeApplyTtsToPayload(params: {
   if (!ttsText.trim()) {
     return nextPayload;
   }
-  if (reply.hasMedia) {
-    return nextPayload;
-  }
-  if (text.includes("MEDIA:")) {
+  if (reply.hasMedia || hasLegacyFinalMediaDirective(text)) {
     return nextPayload;
   }
   if (!explicitTtsText && ttsText.trim().length < 10) {
@@ -2023,7 +2032,7 @@ export async function maybeApplyTtsToPayload(params: {
       logVerbose(
         `TTS: truncating long text (${textForAudio.length} > ${maxLength}), summarization disabled.`,
       );
-      textForAudio = `${textForAudio.slice(0, maxLength - 3)}...`;
+      textForAudio = `${truncateUtf16Safe(textForAudio, maxLength - 3)}...`;
     } else {
       try {
         const summary = await summarizeText({
@@ -2039,12 +2048,12 @@ export async function maybeApplyTtsToPayload(params: {
           logVerbose(
             `TTS: summary exceeded hard limit (${textForAudio.length} > ${config.maxTextLength}); truncating.`,
           );
-          textForAudio = `${textForAudio.slice(0, config.maxTextLength - 3)}...`;
+          textForAudio = `${truncateUtf16Safe(textForAudio, config.maxTextLength - 3)}...`;
         }
       } catch (err) {
         const error = err as Error;
         logVerbose(`TTS: summarization failed, truncating instead: ${error.message}`);
-        textForAudio = `${textForAudio.slice(0, maxLength - 3)}...`;
+        textForAudio = `${truncateUtf16Safe(textForAudio, maxLength - 3)}...`;
       }
     }
   }

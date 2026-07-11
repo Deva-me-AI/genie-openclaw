@@ -1,3 +1,4 @@
+// Browser tests cover index plugin behavior.
 import fs from "node:fs";
 import path from "node:path";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
@@ -70,6 +71,7 @@ function createApi() {
     id: "browser",
     name: "Browser",
     source: "test",
+    rootDir: "/plugins/browser",
     config: {},
     runtime: {} as OpenClawPluginApi["runtime"],
     registerCli,
@@ -106,7 +108,10 @@ function registerBrowserAutoEnableProbe(): BrowserAutoEnableProbe {
 
 describe("browser plugin", () => {
   it("exposes static browser metadata on the plugin definition", () => {
-    expect(browserPluginReload).toEqual({ restartPrefixes: ["browser"] });
+    expect(browserPluginReload).toEqual({
+      restartPrefixes: ["browser"],
+      hotPrefixes: ["browser.profiles"],
+    });
     expect(browserPluginNodeHostCommands).toHaveLength(1);
     expect(browserPluginNodeHostCommands[0]?.command).toBe("browser.proxy");
     expect(browserPluginNodeHostCommands[0]?.cap).toBe("browser");
@@ -145,12 +150,80 @@ describe("browser plugin", () => {
     }
 
     expect(tool.name).toBe("browser");
+    expect(tool.description).toContain("action=profiles");
+    expect(tool.description).not.toContain('profile="user"');
     expect(runtimeApiMocks.createBrowserTool).not.toHaveBeenCalled();
     await tool.execute("call-1", { action: "status" });
     expect(runtimeApiMocks.createBrowserTool).toHaveBeenCalledWith({
       sandboxBridgeUrl: "http://127.0.0.1:9999",
       allowHostControl: true,
       agentSessionKey: "agent:main:webchat:direct:123",
+      mediaScope: {
+        sessionKey: "agent:main:webchat:direct:123",
+        chatType: "direct",
+      },
+    });
+  });
+
+  it("passes runtime context needed for screenshot image understanding", async () => {
+    const { api, registerTool } = createApi();
+    registerBrowserPlugin(api);
+
+    const factory = mockCallArg(registerTool);
+    if (typeof factory !== "function") {
+      throw new Error("expected browser plugin to register a tool factory");
+    }
+
+    const tool = factory({
+      sessionKey: "agent:main:webchat:direct:123",
+      agentDir: "/tmp/agent",
+      workspaceDir: "/tmp/workspace",
+      activeModel: { provider: "openai", modelId: "gpt-5.5" },
+      deliveryContext: { channel: "telegram" },
+    });
+    if (!tool || Array.isArray(tool)) {
+      throw new Error("expected browser plugin to return a single tool");
+    }
+
+    await tool.execute("call-1", { action: "status" });
+    expect(runtimeApiMocks.createBrowserTool).toHaveBeenCalledWith({
+      agentSessionKey: "agent:main:webchat:direct:123",
+      agentDir: "/tmp/agent",
+      workspaceDir: "/tmp/workspace",
+      activeModel: { provider: "openai", model: "gpt-5.5" },
+      mediaScope: {
+        sessionKey: "agent:main:webchat:direct:123",
+        channel: "telegram",
+        chatType: "direct",
+      },
+    });
+  });
+
+  it("derives group chat type for browser media scope", async () => {
+    const { api, registerTool } = createApi();
+    registerBrowserPlugin(api);
+
+    const factory = mockCallArg(registerTool);
+    if (typeof factory !== "function") {
+      throw new Error("expected browser plugin to register a tool factory");
+    }
+
+    const tool = factory({
+      sessionKey: "agent:main:telegram:group:chat-123",
+      messageChannel: "telegram",
+    });
+    if (!tool || Array.isArray(tool)) {
+      throw new Error("expected browser plugin to return a single tool");
+    }
+
+    await tool.execute("call-1", { action: "status" });
+    expect(runtimeApiMocks.createBrowserTool).toHaveBeenCalledWith({
+      agentSessionKey: "agent:main:telegram:group:chat-123",
+      mediaScope: {
+        sessionKey: "agent:main:telegram:group:chat-123",
+        channel: "telegram",
+        chatType: "group",
+      },
     });
   });
 
@@ -172,7 +245,11 @@ describe("browser plugin", () => {
       ],
     });
     await registrar({ program: {} as never });
-    expect(runtimeApiMocks.registerBrowserCli).toHaveBeenCalledWith({});
+    expect(runtimeApiMocks.registerBrowserCli).toHaveBeenCalledWith(
+      {},
+      process.argv,
+      "/plugins/browser",
+    );
   });
 
   it("registers browser.request as an admin gateway method and lazy-loads handler", async () => {

@@ -1,3 +1,4 @@
+// Verifies bundled plugin metadata generation and import boundaries.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -35,6 +36,7 @@ const EXPECTED_BUNDLED_STARTUP_PLUGIN_IDS = [
   "bonjour",
   "browser",
   "canvas",
+  "codex-supervisor",
   "device-pair",
   "diagnostics-otel",
   "diagnostics-prometheus",
@@ -44,11 +46,12 @@ const EXPECTED_BUNDLED_STARTUP_PLUGIN_IDS = [
   "google-meet",
   "llm-task",
   "lobster",
+  "logbook",
   "memory-wiki",
+  "ollama",
   "openshell",
   "phone-control",
   "policy",
-  "skill-workshop",
   "talk-voice",
   "thread-ownership",
   "voice-call",
@@ -62,6 +65,7 @@ const EXPECTED_EMPTY_CONFIG_GATEWAY_STARTUP_PLUGIN_IDS = [
   "device-pair",
   "file-transfer",
   "memory-core",
+  "ollama",
   "phone-control",
   "talk-voice",
 ] as const;
@@ -275,7 +279,7 @@ function collectRepoBundledChannelConfigsForTest(dirName: string) {
   const pluginDir = path.join(repoRoot, "extensions", dirName);
   const manifest = loadPluginManifest(pluginDir, false);
   if (!manifest.ok) {
-    throw manifest.error;
+    throw toLintErrorObject(manifest.error, "Non-Error thrown");
   }
   const configs = collectBundledChannelConfigs({
     pluginDir,
@@ -573,6 +577,14 @@ describe("bundled plugin metadata", () => {
 
     expect(entry?.manifest.commandAliases).toStrictEqual([{ name: "voicecall" }]);
     expect(entry?.manifest.activation?.onCommands).toStrictEqual(["voicecall"]);
+  });
+
+  it("scopes Codex Supervisor CLI activation to the codex command", () => {
+    const entry = listRepoBundledPluginManifests().find(
+      ({ manifest }) => manifest.id === "codex-supervisor",
+    );
+
+    expect(entry?.manifest.activation?.onCommands).toStrictEqual(["codex"]);
   });
 
   it("keeps empty-config Gateway startup narrower than declared startup sidecars", () => {
@@ -1152,3 +1164,17 @@ describe("bundled plugin metadata", () => {
     expect(fs.existsSync(markerPath)).toBe(false);
   });
 });
+
+function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
+  if (value instanceof Error) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return new Error(value);
+  }
+  const error = new Error(fallbackMessage, { cause: value });
+  if ((typeof value === "object" && value !== null) || typeof value === "function") {
+    Object.assign(error, value);
+  }
+  return error;
+}
