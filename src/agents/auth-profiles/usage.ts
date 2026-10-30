@@ -77,9 +77,10 @@ const FAILURE_REASON_ORDER = new Map<AuthProfileFailureReason, number>(
 
 const WHAM_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const WHAM_TIMEOUT_MS = 3_000;
+const AUTH_PROFILE_RATE_LIMIT_COOLDOWN_MAX_MS = 5 * 60_000;
 const WHAM_BURST_COOLDOWN_MS = 15_000;
 const WHAM_PROBE_FAILURE_COOLDOWN_MS = 30_000;
-const WHAM_HTTP_ERROR_COOLDOWN_MS = 5 * 60 * 1000;
+const WHAM_HTTP_ERROR_COOLDOWN_MS = AUTH_PROFILE_RATE_LIMIT_COOLDOWN_MAX_MS;
 const WHAM_TOKEN_EXPIRED_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const WHAM_DEAD_ACCOUNT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
@@ -101,8 +102,6 @@ type WhamUsageResponse = {
 type WhamCooldownProbeResult = {
   cooldownMs: number;
   reason: string;
-  blockedUntil?: number;
-  blockedSource?: AuthProfileBlockedSource;
 };
 
 function shouldProbeWhamForFailure(
@@ -150,6 +149,13 @@ function isWhamWindowExhausted(window: WhamUsageWindow | undefined): boolean {
   );
 }
 
+function clampWhamRateLimitCooldownMs(resetMs: number): number {
+  if (!Number.isFinite(resetMs) || resetMs < 0) {
+    return WHAM_PROBE_FAILURE_COOLDOWN_MS;
+  }
+  return Math.min(resetMs, AUTH_PROFILE_RATE_LIMIT_COOLDOWN_MAX_MS);
+}
+
 function applyWhamCooldownResult(params: {
   existing: ProfileUsageStats;
   computed: ProfileUsageStats;
@@ -157,33 +163,24 @@ function applyWhamCooldownResult(params: {
   whamResult: WhamCooldownProbeResult;
 }): ProfileUsageStats {
   const existingCooldownUntil = params.existing.cooldownUntil;
-  const existingBlockedUntil = params.existing.blockedUntil;
   const existingActiveCooldownUntil =
     typeof existingCooldownUntil === "number" &&
     Number.isFinite(existingCooldownUntil) &&
     existingCooldownUntil > params.now
       ? existingCooldownUntil
       : 0;
-  const existingActiveBlockedUntil =
-    typeof existingBlockedUntil === "number" &&
-    Number.isFinite(existingBlockedUntil) &&
-    existingBlockedUntil > params.now
-      ? existingBlockedUntil
-      : 0;
-  if (params.whamResult.blockedUntil) {
-    return {
-      ...params.computed,
-      blockedUntil: Math.max(existingActiveBlockedUntil, params.whamResult.blockedUntil),
-      blockedReason: "subscription_limit",
-      blockedSource: params.whamResult.blockedSource ?? "wham",
-      blockedModel: undefined,
-      cooldownUntil: undefined,
-      cooldownReason: undefined,
-      cooldownModel: undefined,
-    };
-  }
   return {
     ...params.computed,
+    // WHAM reset windows are provider telemetry for a 429 path, not a
+    // subscription-disable contract. Keep them in the bounded cooldown lane.
+    blockedUntil:
+      params.existing.blockedSource === "wham" ? undefined : params.computed.blockedUntil,
+    blockedReason:
+      params.existing.blockedSource === "wham" ? undefined : params.computed.blockedReason,
+    blockedSource:
+      params.existing.blockedSource === "wham" ? undefined : params.computed.blockedSource,
+    blockedModel:
+      params.existing.blockedSource === "wham" ? undefined : params.computed.blockedModel,
     cooldownUntil: Math.max(existingActiveCooldownUntil, params.now + params.whamResult.cooldownMs),
   };
 }
@@ -250,9 +247,7 @@ async function probeWhamForCooldown(
         return { cooldownMs: WHAM_PROBE_FAILURE_COOLDOWN_MS, reason: "wham_probe_failed" };
       }
       return {
-        cooldownMs: WHAM_BURST_COOLDOWN_MS,
-        blockedUntil: now + primaryResetMs,
-        blockedSource: "wham",
+        cooldownMs: clampWhamRateLimitCooldownMs(primaryResetMs),
         reason: "wham_personal_rolling",
       };
     }
@@ -262,9 +257,7 @@ async function probeWhamForCooldown(
         return { cooldownMs: WHAM_PROBE_FAILURE_COOLDOWN_MS, reason: "wham_probe_failed" };
       }
       return {
-        cooldownMs: WHAM_BURST_COOLDOWN_MS,
-        blockedUntil: now + secondaryResetMs,
-        blockedSource: "wham",
+        cooldownMs: clampWhamRateLimitCooldownMs(secondaryResetMs),
         reason: "wham_team_weekly",
       };
     }
@@ -274,9 +267,7 @@ async function probeWhamForCooldown(
         return { cooldownMs: WHAM_PROBE_FAILURE_COOLDOWN_MS, reason: "wham_probe_failed" };
       }
       return {
-        cooldownMs: WHAM_BURST_COOLDOWN_MS,
-        blockedUntil: now + primaryResetMs,
-        blockedSource: "wham",
+        cooldownMs: clampWhamRateLimitCooldownMs(primaryResetMs),
         reason: "wham_team_rolling",
       };
     }
@@ -381,7 +372,7 @@ export function calculateAuthProfileCooldownMs(errorCount: number): number {
   if (normalized <= 2) {
     return 60_000; // 1 minute
   }
-  return 5 * 60_000; // 5 minutes max
+  return AUTH_PROFILE_RATE_LIMIT_COOLDOWN_MAX_MS; // 5 minutes max
 }
 
 type ResolvedAuthCooldownConfig = {

@@ -8,6 +8,7 @@ import { resolveAuthStorePath } from "./paths.js";
 import {
   clearLastGoodProfileWithLock,
   promoteAuthProfileInOrder,
+  upsertAuthProfile,
   upsertAuthProfileWithLock,
 } from "./profiles.js";
 import {
@@ -16,7 +17,8 @@ import {
   loadAuthProfileStoreWithoutExternalProfiles,
   saveAuthProfileStore,
 } from "./store.js";
-import type { AuthProfileStore } from "./types.js";
+import type { AuthProfileCredential, AuthProfileStore, ProfileUsageStats } from "./types.js";
+import { upsertAuthProfileWithLock as upsertAuthProfileWithStandaloneLock } from "./upsert-with-lock.js";
 
 type ExpectedOAuthCredentialFields = {
   provider: string;
@@ -55,7 +57,163 @@ function expectOAuthCredentialFields(
   return credential;
 }
 
+function expectProfileUsageErrorStateCleared(
+  stats: NonNullable<AuthProfileStore["usageStats"]>[string] | undefined,
+) {
+  expect(stats?.blockedUntil).toBeUndefined();
+  expect(stats?.blockedReason).toBeUndefined();
+  expect(stats?.blockedSource).toBeUndefined();
+  expect(stats?.blockedModel).toBeUndefined();
+  expect(stats?.cooldownUntil).toBeUndefined();
+  expect(stats?.cooldownReason).toBeUndefined();
+  expect(stats?.cooldownModel).toBeUndefined();
+  expect(stats?.disabledUntil).toBeUndefined();
+  expect(stats?.disabledReason).toBeUndefined();
+  expect(stats?.errorCount).toBe(0);
+  expect(stats?.failureCounts).toBeUndefined();
+}
+
+async function withTempAgentDir<T>(
+  prefix: string,
+  run: (agentDir: string) => T | Promise<T>,
+): Promise<T> {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const agentDir = path.join(stateDir, "agents", "main", "agent");
+  const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+  process.env.OPENCLAW_STATE_DIR = stateDir;
+  try {
+    fs.mkdirSync(agentDir, { recursive: true });
+    return await run(agentDir);
+  } finally {
+    if (previousStateDir === undefined) {
+      delete process.env.OPENCLAW_STATE_DIR;
+    } else {
+      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+    }
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+}
+
+function buildStaleUsageStats(params: {
+  now: number;
+  lastUsed: number;
+  blockedSource: NonNullable<ProfileUsageStats["blockedSource"]>;
+}): ProfileUsageStats {
+  return {
+    blockedUntil: params.now + 27_195 * 60_000,
+    blockedReason: "subscription_limit",
+    blockedSource: params.blockedSource,
+    blockedModel: "sonnet-4.6",
+    cooldownUntil: params.now + 60_000,
+    cooldownReason: "rate_limit",
+    cooldownModel: "sonnet-4.6",
+    disabledUntil: params.now + 5 * 60 * 60_000,
+    disabledReason: "billing",
+    errorCount: 4,
+    failureCounts: { billing: 1, rate_limit: 3 },
+    lastUsed: params.lastUsed,
+  };
+}
+
+const staleCodexCredential = {
+  type: "oauth",
+  provider: "openai-codex",
+  access: "stale-access",
+  refresh: "stale-refresh",
+  expires: Date.now() + 60_000,
+} as const satisfies AuthProfileCredential;
+
+const freshCodexCredential = {
+  type: "oauth",
+  provider: "openai-codex",
+  access: "fresh-access",
+  refresh: "fresh-refresh",
+  expires: Date.now() + 60 * 60_000,
+} as const satisfies AuthProfileCredential;
+
 describe("promoteAuthProfileInOrder", () => {
+  it.each([
+    {
+      label: "locked upsert path",
+      prefix: "openclaw-auth-profile-reconnect-",
+      profileId: "openai-codex:default",
+      staleCredential: staleCodexCredential,
+      freshCredential: freshCodexCredential,
+      blockedSource: "wham",
+      upsert: upsertAuthProfileWithLock,
+    },
+    {
+      label: "local upsert path",
+      prefix: "openclaw-auth-profile-local-",
+      profileId: "openai-codex:default",
+      staleCredential: staleCodexCredential,
+      freshCredential: freshCodexCredential,
+      blockedSource: "wham",
+      upsert: upsertAuthProfile,
+    },
+    {
+      label: "standalone locked upsert path",
+      prefix: "openclaw-auth-profile-standalone-",
+      profileId: "self-hosted:test",
+      staleCredential: {
+        type: "api_key",
+        provider: "self-hosted",
+        key: "stale-key",
+      } as const satisfies AuthProfileCredential,
+      freshCredential: {
+        type: "api_key",
+        provider: "self-hosted",
+        key: "fresh-key",
+      } as const satisfies AuthProfileCredential,
+      blockedSource: "codex_rate_limits",
+      upsert: upsertAuthProfileWithStandaloneLock,
+      expectedProfile: { key: "fresh-key" },
+    },
+  ] as const)(
+    "clears stale cooldowns when reconnecting through the $label",
+    async ({
+      prefix,
+      profileId,
+      staleCredential,
+      freshCredential,
+      blockedSource,
+      upsert,
+      expectedProfile,
+    }) => {
+      await withTempAgentDir(prefix, async (agentDir) => {
+        const now = Date.now();
+        const lastUsed = now - 30_000;
+        saveAuthProfileStore(
+          {
+            version: AUTH_STORE_VERSION,
+            profiles: { [profileId]: staleCredential },
+            usageStats: {
+              [profileId]: buildStaleUsageStats({ now, lastUsed, blockedSource }),
+            },
+          },
+          agentDir,
+        );
+
+        const updated = await upsert({
+          profileId,
+          credential: freshCredential,
+          agentDir,
+        });
+
+        if (expectedProfile) {
+          expect(updated).not.toBeNull();
+        }
+        const store = loadAuthProfileStoreForRuntime(agentDir);
+        if (expectedProfile) {
+          expect(store.profiles[profileId]).toMatchObject(expectedProfile);
+        }
+        const stats = store.usageStats?.[profileId];
+        expectProfileUsageErrorStateCleared(stats);
+        expect(stats?.lastUsed).toBe(lastUsed);
+      });
+    },
+  );
+
   it("normalizes copied secrets when using the locked upsert path", async () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-auth-profile-upsert-"));
     const agentDir = path.join(stateDir, "agents", "main", "agent");
