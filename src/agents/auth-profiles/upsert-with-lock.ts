@@ -1,7 +1,7 @@
 import { normalizeSecretInput } from "../../utils/normalize-secret-input.js";
 import { ensureAuthStoreFile, resolveAuthStorePath } from "./paths.js";
 import { updateAuthProfileStoreWithLock } from "./store.js";
-import type { AuthProfileCredential, AuthProfileStore } from "./types.js";
+import type { AuthProfileCredential, AuthProfileStore, ProfileUsageStats } from "./types.js";
 
 function normalizeAuthProfileCredential(credential: AuthProfileCredential): AuthProfileCredential {
   if (credential.type === "api_key") {
@@ -26,6 +26,28 @@ function normalizeAuthProfileCredential(credential: AuthProfileCredential): Auth
   return credential;
 }
 
+function clearCredentialUpsertErrorState(
+  existing: ProfileUsageStats | undefined,
+): ProfileUsageStats | undefined {
+  if (!existing) {
+    return undefined;
+  }
+  return {
+    ...existing,
+    errorCount: 0,
+    blockedUntil: undefined,
+    blockedReason: undefined,
+    blockedSource: undefined,
+    blockedModel: undefined,
+    cooldownUntil: undefined,
+    cooldownReason: undefined,
+    cooldownModel: undefined,
+    disabledUntil: undefined,
+    disabledReason: undefined,
+    failureCounts: undefined,
+  };
+}
+
 export async function upsertAuthProfileWithLock(params: {
   profileId: string;
   credential: AuthProfileCredential;
@@ -44,6 +66,12 @@ export async function upsertAuthProfileWithLock(params: {
       },
       updater: (store) => {
         store.profiles[params.profileId] = credential;
+        if (store.usageStats?.[params.profileId]) {
+          const nextStats = clearCredentialUpsertErrorState(store.usageStats[params.profileId]);
+          if (nextStats) {
+            store.usageStats[params.profileId] = nextStats;
+          }
+        }
         return true;
       },
     });
