@@ -8,6 +8,34 @@ import {
 } from "./format.js";
 
 describe("markdownToTelegramHtml", () => {
+  it("renders an inline code span that is only a URL as a tappable link", () => {
+    const url = "https://foomfamily.ai/approve/befe0484-a4d7-434a-93f4-709211f20636";
+    expect(markdownToTelegramHtml(`Approve: \`${url}\``)).toBe(
+      `Approve: <a href="${url}">${url}</a>`,
+    );
+    expect(markdownToTelegramHtml("`http://example.com/a?b=1&c=2`")).toBe(
+      '<a href="http://example.com/a?b=1&amp;c=2">http://example.com/a?b=1&amp;c=2</a>',
+    );
+  });
+
+  it("keeps code formatting for code spans that are not a bare URL", () => {
+    expect(markdownToTelegramHtml("`curl https://example.com`")).toBe(
+      "<code>curl https://example.com</code>",
+    );
+    expect(markdownToTelegramHtml("`ftp://example.com/file`")).toBe(
+      "<code>ftp://example.com/file</code>",
+    );
+    expect(markdownToTelegramHtml("```\nhttps://example.com\n```")).toBe(
+      "<pre><code>https://example.com\n</code></pre>",
+    );
+  });
+
+  it("promotes URL code spans in chunked rendering too", () => {
+    const url = "https://example.com/approve/123";
+    const chunks = markdownToTelegramChunks(`tap \`${url}\``, 4096);
+    expect(chunks.map((c) => c.html).join("")).toBe(`tap <a href="${url}">${url}</a>`);
+  });
+
   it("handles core markdown-to-telegram conversions", () => {
     const cases = [
       [

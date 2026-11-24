@@ -67,8 +67,40 @@ function buildTelegramCodeBlockOpen(span: { language?: string }): string {
   return `<pre><code class="language-${escapeHtmlAttr(span.language)}">`;
 }
 
+const BARE_WEB_URL_RE = /^https?:\/\/[^\s<>"'`]+$/i;
+
+/**
+ * Models often wrap a URL the user must tap (approve links, dashboards) in
+ * inline code. Telegram renders <code> as monospace text, never as a link, so
+ * the URL can't be tapped. When an inline code span is nothing but a single
+ * http(s) URL, render it as a plain link instead. Code blocks and code spans
+ * with any other content are left untouched.
+ */
+function promoteInlineCodeUrlsToLinks(ir: MarkdownIR): MarkdownIR {
+  const promoted: MarkdownLinkSpan[] = [];
+  const styles = ir.styles.filter((span) => {
+    if (span.style !== "code" || span.end <= span.start) {
+      return true;
+    }
+    const content = ir.text.slice(span.start, span.end);
+    if (!BARE_WEB_URL_RE.test(content)) {
+      return true;
+    }
+    const overlapsLink = ir.links.some((link) => link.start < span.end && link.end > span.start);
+    if (!overlapsLink) {
+      promoted.push({ start: span.start, end: span.end, href: content });
+    }
+    return false;
+  });
+  if (styles.length === ir.styles.length) {
+    return ir;
+  }
+  const links = [...ir.links, ...promoted].toSorted((a, b) => a.start - b.start);
+  return { ...ir, styles, links };
+}
+
 function renderTelegramHtml(ir: MarkdownIR): string {
-  return renderMarkdownWithMarkers(ir, {
+  return renderMarkdownWithMarkers(promoteInlineCodeUrlsToLinks(ir), {
     styleMarkers: {
       bold: { open: "<b>", close: "</b>" },
       italic: { open: "<i>", close: "</i>" },
