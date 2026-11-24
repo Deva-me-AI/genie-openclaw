@@ -8,6 +8,60 @@ import {
 } from "./format.js";
 
 describe("markdownToTelegramHtml", () => {
+  it("renders an inline code span that is only a URL as a tappable link", () => {
+    const url = "https://example.com/approve/00000000-0000-4000-8000-000000000000";
+    expect(markdownToTelegramHtml(`Approve: \`${url}\``)).toBe(
+      `Approve: <a href="${url}">${url}</a>`,
+    );
+    expect(markdownToTelegramHtml("`http://example.com/a?b=1&c=2`")).toBe(
+      '<a href="http://example.com/a?b=1&amp;c=2">http://example.com/a?b=1&amp;c=2</a>',
+    );
+  });
+
+  it("keeps code formatting for code spans that are not a bare URL", () => {
+    expect(markdownToTelegramHtml("`curl https://example.com`")).toBe(
+      "<code>curl https://example.com</code>",
+    );
+    expect(markdownToTelegramHtml("`ftp://example.com/file`")).toBe(
+      "<code>ftp://example.com/file</code>",
+    );
+    expect(markdownToTelegramHtml("```\nhttps://example.com\n```")).toBe(
+      "<pre><code>https://example.com\n</code></pre>",
+    );
+  });
+
+  it("promotes URL code spans in chunked rendering too", () => {
+    const url = "https://example.com/approve/123";
+    const chunks = markdownToTelegramChunks(`tap \`${url}\``, 4096);
+    expect(chunks.map((c) => c.html).join("")).toBe(`tap <a href="${url}">${url}</a>`);
+  });
+
+  it("keeps every chunk of a split URL linked to the full URL", () => {
+    const url = `https://example.com/approve/${"a".repeat(120)}`;
+    const chunks = markdownToTelegramChunks(`\`${url}\``, 50);
+    expect(chunks.length).toBeGreaterThan(1);
+    const hrefs = chunks.flatMap((c) =>
+      [...c.html.matchAll(/<a href="([^"]+)">/g)].map((m) => m[1]),
+    );
+    expect(hrefs.length).toBeGreaterThan(0);
+    for (const href of hrefs) {
+      expect(href).toBe(url);
+    }
+  });
+
+  it("keeps code style for a URL code span inside a markdown link", () => {
+    expect(markdownToTelegramHtml("[`https://a.com`](https://b.com)")).toBe(
+      '<a href="https://b.com"><code>https://a.com</code></a>',
+    );
+  });
+
+  it("shows a promoted URL once in the plain-text fallback", () => {
+    const url = "https://example.com/approve/1";
+    expect(telegramHtmlToPlainTextFallback(markdownToTelegramHtml(`Approve: \`${url}\``))).toBe(
+      `Approve: ${url}`,
+    );
+  });
+
   it("handles core markdown-to-telegram conversions", () => {
     const cases = [
       [
