@@ -70,11 +70,8 @@ function buildTelegramCodeBlockOpen(span: { language?: string }): string {
 const BARE_WEB_URL_RE = /^https?:\/\/[^\s<>"'`]+$/i;
 
 /**
- * Models often wrap a URL the user must tap (approve links, dashboards) in
- * inline code. Telegram renders <code> as monospace text, never as a link, so
- * the URL can't be tapped. When an inline code span is nothing but a single
- * http(s) URL, render it as a plain link instead. Code blocks and code spans
- * with any other content are left untouched.
+ * Models often wrap a URL the user must tap in inline code, which Telegram never links.
+ * Render an inline code span that is only one http(s) URL as a plain link instead.
  */
 function promoteInlineCodeUrlsToLinks(ir: MarkdownIR): MarkdownIR {
   const promoted: MarkdownLinkSpan[] = [];
@@ -86,10 +83,10 @@ function promoteInlineCodeUrlsToLinks(ir: MarkdownIR): MarkdownIR {
     if (!BARE_WEB_URL_RE.test(content)) {
       return true;
     }
-    const overlapsLink = ir.links.some((link) => link.start < span.end && link.end > span.start);
-    if (!overlapsLink) {
-      promoted.push({ start: span.start, end: span.end, href: content });
+    if (ir.links.some((link) => link.start < span.end && link.end > span.start)) {
+      return true;
     }
+    promoted.push({ start: span.start, end: span.end, href: content });
     return false;
   });
   if (styles.length === ir.styles.length) {
@@ -100,7 +97,7 @@ function promoteInlineCodeUrlsToLinks(ir: MarkdownIR): MarkdownIR {
 }
 
 function renderTelegramHtml(ir: MarkdownIR): string {
-  return renderMarkdownWithMarkers(promoteInlineCodeUrlsToLinks(ir), {
+  return renderMarkdownWithMarkers(ir, {
     styleMarkers: {
       bold: { open: "<b>", close: "</b>" },
       italic: { open: "<i>", close: "</i>" },
@@ -178,7 +175,7 @@ export function markdownToTelegramHtml(
     blockquotePrefix: "",
     tableMode: options.tableMode,
   });
-  const html = renderTelegramHtml(ir);
+  const html = renderTelegramHtml(promoteInlineCodeUrlsToLinks(ir));
   const telegramHtml = preserveSupportedTelegramHtmlTags(html);
   // Apply file reference wrapping if requested (for chunked rendering)
   if (options.wrapFileRefs !== false) {
@@ -818,7 +815,8 @@ export function markdownToTelegramChunks(
     blockquotePrefix: "",
     tableMode: options.tableMode,
   });
-  return renderTelegramChunksWithinHtmlLimit(ir, limit);
+  // Promote before chunking so every slice of a split link keeps the full href.
+  return renderTelegramChunksWithinHtmlLimit(promoteInlineCodeUrlsToLinks(ir), limit);
 }
 
 export function markdownToTelegramHtmlChunks(
